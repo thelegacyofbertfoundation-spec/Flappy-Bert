@@ -426,9 +426,27 @@ html, body {
 
 <div class="level-indicator" id="levelIndicator">LVL 1</div>
 
-<div class="power-bar" id="powerBar">
-  <span id="powerName">SHIELD</span>
-  <div class="power-timer"><div class="power-timer-fill" id="powerTimerFill"></div></div>
+<div class="power-bar" id="multBar">
+  <span id="multLabel">1.5X SCORE</span>
+</div>
+
+<!-- Daily Streak Popup -->
+<div class="overlay" id="streakOverlay" style="z-index:60">
+  <div class="go-panel" style="border-color:var(--accent2)">
+    <div style="font-size:32px;margin-bottom:8px" id="streakEmoji">&#x1F525;</div>
+    <div style="font-size:clamp(12px,3vw,16px);color:var(--accent2);margin-bottom:8px" id="streakTitle">DAY 1 STREAK!</div>
+    <div style="font-size:clamp(8px,2vw,10px);color:var(--accent3);margin-bottom:16px" id="streakReward">+10 &#x1FA99;</div>
+    <button class="btn btn-primary" onclick="claimStreak()">CLAIM</button>
+  </div>
+</div>
+
+<!-- Daily Challenges Panel -->
+<div class="overlay" id="challengeOverlay">
+  <div class="shop-panel" style="border-color:var(--accent2)">
+    <div class="shop-title" style="color:var(--accent2)">&#x1F3AF; DAILY CHALLENGES</div>
+    <div id="challengeList"></div>
+    <button class="btn btn-secondary" style="margin-top:12px" onclick="hideAllOverlays();showOverlay('menuOverlay')">&#x2190; BACK</button>
+  </div>
 </div>
 
 <!-- Get Ready -->
@@ -458,7 +476,9 @@ html, body {
   <div class="menu-subtitle">FLAP TO EARN</div>
   <button class="btn btn-primary" onclick="startGame()">&#9654; PLAY</button>
   <button class="btn btn-secondary" onclick="showShop()">&#x1F6D2; SHOP</button>
+  <button class="btn btn-secondary" onclick="showChallenges()" style="border-color:var(--accent2);color:var(--accent2)">&#x1F3AF; CHALLENGES</button>
   <button class="btn btn-gold" onclick="showLeaderboard()">&#x1F3C6; RANKINGS</button>
+  <div id="menuStreak" style="font-size:clamp(6px,1.4vw,8px);color:var(--accent2);margin-top:10px;display:none">&#x1F525; STREAK: <span id="menuStreakCount">0</span> DAYS</div>
 </div>
 
 <!-- Game Over -->
@@ -472,7 +492,11 @@ html, body {
     <div class="go-coins" id="goCoins">+0 &#x1FA99;</div>
     <div class="go-level" id="goLevel">LEVEL 1</div>
     <div id="goCombo" style="font-size:7px;color:#ffb800;margin:4px 0;display:none"></div>
-    <button class="btn btn-primary" onclick="startGame()">&#x1F504; RETRY</button>
+    <div id="goMultiplier" style="font-size:7px;color:var(--accent3);margin:4px 0;display:none"></div>
+    <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="startGame()">&#x1F504; RETRY</button>
+      <button class="btn btn-gold" style="min-width:100px" onclick="shareScoreCard()">&#x1F4F7; SHARE</button>
+    </div>
     <button class="btn btn-secondary" onclick="showMenu()">&#x1F3E0; MENU</button>
   </div>
 </div>
@@ -527,20 +551,25 @@ const G = {
   // Difficulty
   basePipeGap: 190,
   baseSpeed: 2.5,
-  // Power-ups
-  activePower: null,
-  powerTimer: 0,
-  powerDuration: 0,
-  shieldActive: false,
-  slowMoActive: false,
+  // Multipliers (replace powers)
   scoreMultiplier: 1,
-  smallBert: false,
+  ownedMultipliers: {},  // { mult15: 2, mult2: 3 } remaining uses
+  equippedMultiplier: null,
   // Player data
   playerName: 'Player',
   ownedSkins: ['default'],
   equippedSkin: 'default',
-  ownedPowers: [],
-  equippedPower: null,
+  // Daily streak
+  dailyStreak: 0,
+  lastLoginDate: null,
+  streakClaimed: false,
+  // Daily challenges
+  dailyChallenges: [],
+  dailyChallengeDate: null,
+  gamesPlayedToday: 0,
+  nearMissesToday: 0,
+  bestComboToday: 0,
+  coinsEarnedToday: 0,
   // Leaderboard
   leaderboard: [],
   weekStart: 0,
@@ -558,9 +587,6 @@ const G = {
   bestCombo: 0,
   // Pause
   paused: false,
-  // Power states
-  ghostActive: false,
-  gravFlipped: false,
   // Tutorial
   hasPlayedBefore: false,
 };
@@ -577,15 +603,22 @@ const SKINS = [
   { id: 'cosmic', name: 'COSMIC BERT', desc: 'Stars and galaxies', price: 300, color: '#ff88ff' },
 ];
 
-const POWERS = [
-  { id: 'shield', name: 'SHIELD', desc: 'Survive 1 hit per game', price: 75, duration: 0, icon: '\u{1F6E1}' },
-  { id: 'slowmo', name: 'SLOW-MO', desc: 'Slows pipes for 5 seconds', price: 100, duration: 5000, icon: '\u{23F3}' },
-  { id: 'small', name: 'MINI BERT', desc: 'Smaller hitbox for 8 seconds', price: 120, duration: 8000, icon: '\u{1F4A0}' },
-  { id: 'double', name: '2X COINS', desc: 'Double coins for 10 seconds', price: 80, duration: 10000, icon: '\u{2728}' },
-  { id: 'magnet', name: 'COIN MAGNET', desc: 'Attract coins from far away', price: 150, duration: 8000, icon: '\u{1F9F2}' },
-  { id: 'ghost', name: 'GHOST MODE', desc: 'Phase through pipes for 4s', price: 200, duration: 4000, icon: '\u{1F47B}' },
-  { id: 'flipgrav', name: 'GRAVITY FLIP', desc: 'Reverse gravity for 6s', price: 180, duration: 6000, icon: '\u{1F504}' },
+const MULTIPLIERS = [
+  { id: 'mult15', name: '1.5X SCORE', desc: '1.5x scores for 3 games', price: 500, mult: 1.5, icon: '\u{2B50}', uses: 3 },
+  { id: 'mult2', name: '2X SCORE', desc: 'Double scores for 3 games', price: 2500, mult: 2, icon: '\u{1F31F}', uses: 3 },
 ];
+
+// Challenge templates
+const CHALLENGE_TEMPLATES = [
+  { type: 'score', text: 'Score {n} in one game', targets: [10, 15, 20, 25, 30], reward: [30, 50, 75, 100, 150] },
+  { type: 'nearmiss', text: 'Get {n} near-misses today', targets: [3, 5, 8], reward: [40, 60, 100] },
+  { type: 'combo', text: 'Reach a {n}x combo streak', targets: [3, 5, 7, 10], reward: [30, 60, 100, 150] },
+  { type: 'coins', text: 'Earn {n} coins in one game', targets: [20, 40, 60], reward: [25, 50, 80] },
+  { type: 'games', text: 'Play {n} games today', targets: [3, 5, 8, 10], reward: [20, 40, 60, 80] },
+  { type: 'level', text: 'Reach level {n} in one game', targets: [2, 3, 4, 5], reward: [30, 50, 80, 120] },
+];
+
+const STREAK_REWARDS = [10, 25, 50, 75, 100, 150, 250];
 
 // ========== SPRITE LOADING ==========
 const bertSprite = new Image();
@@ -603,6 +636,9 @@ function init() {
   updateCoinDisplay();
   resizeCanvas();
   generateStars();
+  
+  // Check daily streak & challenges
+  checkDailyLogin();
   
   window.addEventListener('resize', resizeCanvas);
   
@@ -825,12 +861,23 @@ function loadData() {
     G.bestScore = d.bestScore || 0;
     G.ownedSkins = d.ownedSkins || ['default'];
     G.equippedSkin = d.equippedSkin || 'default';
-    G.ownedPowers = d.ownedPowers || [];
-    G.equippedPower = d.equippedPower || null;
+    G.ownedMultipliers = d.ownedMultipliers || {};
+    G.equippedMultiplier = d.equippedMultiplier || null;
     G.playerName = d.playerName || 'Player';
     G.leaderboard = d.leaderboard || [];
     G.weekStart = d.weekStart || getWeekStart();
     G.hasPlayedBefore = d.hasPlayedBefore || false;
+    // Daily streak
+    G.dailyStreak = d.dailyStreak || 0;
+    G.lastLoginDate = d.lastLoginDate || null;
+    G.streakClaimed = d.streakClaimed || false;
+    // Daily challenges
+    G.dailyChallenges = d.dailyChallenges || [];
+    G.dailyChallengeDate = d.dailyChallengeDate || null;
+    G.gamesPlayedToday = d.gamesPlayedToday || 0;
+    G.nearMissesToday = d.nearMissesToday || 0;
+    G.bestComboToday = d.bestComboToday || 0;
+    G.coinsEarnedToday = d.coinsEarnedToday || 0;
     // Check weekly reset
     const currentWeek = getWeekStart();
     if (currentWeek > G.weekStart) {
@@ -847,12 +894,21 @@ function saveData() {
       bestScore: G.bestScore,
       ownedSkins: G.ownedSkins,
       equippedSkin: G.equippedSkin,
-      ownedPowers: G.ownedPowers,
-      equippedPower: G.equippedPower,
+      ownedMultipliers: G.ownedMultipliers,
+      equippedMultiplier: G.equippedMultiplier,
       playerName: G.playerName,
       leaderboard: G.leaderboard,
       weekStart: G.weekStart,
       hasPlayedBefore: G.hasPlayedBefore,
+      dailyStreak: G.dailyStreak,
+      lastLoginDate: G.lastLoginDate,
+      streakClaimed: G.streakClaimed,
+      dailyChallenges: G.dailyChallenges,
+      dailyChallengeDate: G.dailyChallengeDate,
+      gamesPlayedToday: G.gamesPlayedToday,
+      nearMissesToday: G.nearMissesToday,
+      bestComboToday: G.bestComboToday,
+      coinsEarnedToday: G.coinsEarnedToday,
     }));
   } catch(e) {}
 }
@@ -896,14 +952,7 @@ function startGame() {
   G.pipeGap = G.basePipeGap;
   G.pipeTimer = -50;
   G.scrollDistance = 0;
-  G.activePower = null;
-  G.powerTimer = 0;
-  G.shieldActive = false;
-  G.slowMoActive = false;
   G.scoreMultiplier = 1;
-  G.smallBert = false;
-  G.ghostActive = false;
-  G.gravFlipped = false;
   G.flapHeld = false;
   G.flapHoldFrames = 0;
   G.combo = 0;
@@ -915,6 +964,22 @@ function startGame() {
   G.readyTimer = 0;
   G.readyBobFrame = 0;
   
+  // Apply equipped multiplier and consume 1 use
+  if (G.equippedMultiplier && G.ownedMultipliers[G.equippedMultiplier] > 0) {
+    const m = MULTIPLIERS.find(x => x.id === G.equippedMultiplier);
+    if (m) {
+      G.scoreMultiplier = m.mult;
+      G.ownedMultipliers[G.equippedMultiplier]--;
+      if (G.ownedMultipliers[G.equippedMultiplier] <= 0) {
+        delete G.ownedMultipliers[G.equippedMultiplier];
+        G.equippedMultiplier = null;
+      }
+      saveData();
+    }
+  } else {
+    G.equippedMultiplier = null;
+  }
+  
   G.bert = {
     x: G.width * 0.25,
     y: G.height * 0.4,
@@ -924,14 +989,8 @@ function startGame() {
     tailDir: 1,
   };
   
-  // Activate equipped power at start
-  if (G.equippedPower) {
-    activatePower(G.equippedPower);
-    const idx = G.ownedPowers.indexOf(G.equippedPower);
-    if (idx >= 0) G.ownedPowers.splice(idx, 1);
-    G.equippedPower = null;
-    saveData();
-  }
+  // Track games played today for challenges
+  G.gamesPlayedToday++;
   
   document.getElementById('scoreDisplay').style.display = 'none';
   document.getElementById('levelIndicator').style.display = 'none';
@@ -959,6 +1018,11 @@ function onFlapStart() {
     document.getElementById('levelIndicator').style.display = 'block';
     document.getElementById('levelIndicator').textContent = 'LVL 1';
     document.getElementById('pauseBtn').style.display = 'flex';
+    // Show multiplier indicator if active
+    if (G.scoreMultiplier > 1) {
+      document.getElementById('multBar').style.display = 'flex';
+      document.getElementById('multLabel').textContent = G.scoreMultiplier + 'X SCORE';
+    }
     AudioSystem.startMusic();
     saveData();
   }
@@ -967,9 +1031,7 @@ function onFlapStart() {
     G.flapHeld = true;
     G.flapHoldFrames = 0;
     
-    // Flap direction reverses with gravity
-    const flapDir = G.gravFlipped ? -1 : 1;
-    G.bert.vy = G.flapForce * 0.65 * flapDir;
+    G.bert.vy = G.flapForce * 0.65;
     G.bert.tailDir *= -1;
     AudioSystem.playFlap();
     
@@ -1028,37 +1090,10 @@ function quitToMenu() {
   AudioSystem.stopMusic();
   document.getElementById('scoreDisplay').style.display = 'none';
   document.getElementById('levelIndicator').style.display = 'none';
-  document.getElementById('powerBar').style.display = 'none';
+  document.getElementById('multBar').style.display = 'none';
   document.getElementById('pauseBtn').style.display = 'none';
   document.getElementById('comboDisplay').style.display = 'none';
   showMenu();
-}
-
-function activatePower(powerId) {
-  const power = POWERS.find(p => p.id === powerId);
-  if (!power) return;
-  
-  G.activePower = powerId;
-  G.powerTimer = power.duration;
-  G.powerDuration = power.duration;
-  
-  if (powerId === 'shield') {
-    G.shieldActive = true;
-    G.powerTimer = 99999;
-    G.powerDuration = 99999;
-  }
-  if (powerId === 'slowmo') G.slowMoActive = true;
-  if (powerId === 'small') G.smallBert = true;
-  if (powerId === 'double') G.scoreMultiplier = 2;
-  if (powerId === 'ghost') G.ghostActive = true;
-  if (powerId === 'flipgrav') G.gravFlipped = true;
-  
-  if (power.duration > 0) {
-    document.getElementById('powerBar').style.display = 'flex';
-    document.getElementById('powerName').textContent = power.icon + ' ' + power.name;
-  }
-  
-  showToast(power.icon + ' ' + power.name + ' ACTIVATED!', 'info');
 }
 
 function updateDifficulty() {
@@ -1100,16 +1135,12 @@ function addPipe() {
 
 function checkCollision() {
   const b = G.bert;
-  const size = G.smallBert ? G.bertSize * 0.6 : G.bertSize;
-  const hitR = size * 0.35;
+  const hitR = G.bertSize * 0.35;
   
   // Ground/ceiling
   if (b.y + hitR > G.height - G.groundHeight || b.y - hitR < 0) {
     return true;
   }
-  
-  // Ghost mode — phase through pipes, no pipe collision
-  if (G.ghostActive) return false;
   
   // Pipes
   for (const p of G.pipes) {
@@ -1162,12 +1193,16 @@ function gameOver() {
 function showGameOverScreen() {
   G.state = 'gameover';
   
-  // Calculate coins earned
+  // Calculate coins earned with multiplier
   G.coinsEarned = Math.floor(G.score * G.scoreMultiplier);
   G.coinsEarned += (G.level - 1) * 5;
-  // Combo bonus
   if (G.bestCombo >= 5) G.coinsEarned += G.bestCombo;
   G.coins += G.coinsEarned;
+  
+  // Track daily stats for challenges
+  G.coinsEarnedToday += G.coinsEarned;
+  if (G.bestCombo > G.bestComboToday) G.bestComboToday = G.bestCombo;
+  checkDailyChallenges();
   
   const isNewBest = G.score > G.bestScore;
   if (isNewBest) G.bestScore = G.score;
@@ -1179,14 +1214,14 @@ function showGameOverScreen() {
   
   document.getElementById('scoreDisplay').style.display = 'none';
   document.getElementById('levelIndicator').style.display = 'none';
-  document.getElementById('powerBar').style.display = 'none';
+  document.getElementById('multBar').style.display = 'none';
   
   // Medal
   const medalEl = document.getElementById('goMedal');
-  if (G.score >= 50) { medalEl.textContent = '\u{1F48E}'; medalEl.style.display = 'block'; } // Platinum
-  else if (G.score >= 30) { medalEl.textContent = '\u{1F947}'; medalEl.style.display = 'block'; } // Gold
-  else if (G.score >= 20) { medalEl.textContent = '\u{1F948}'; medalEl.style.display = 'block'; } // Silver
-  else if (G.score >= 10) { medalEl.textContent = '\u{1F949}'; medalEl.style.display = 'block'; } // Bronze
+  if (G.score >= 50) { medalEl.textContent = '\u{1F48E}'; medalEl.style.display = 'block'; }
+  else if (G.score >= 30) { medalEl.textContent = '\u{1F947}'; medalEl.style.display = 'block'; }
+  else if (G.score >= 20) { medalEl.textContent = '\u{1F948}'; medalEl.style.display = 'block'; }
+  else if (G.score >= 10) { medalEl.textContent = '\u{1F949}'; medalEl.style.display = 'block'; }
   else { medalEl.style.display = 'none'; }
   
   document.getElementById('goScore').textContent = G.score;
@@ -1203,6 +1238,15 @@ function showGameOverScreen() {
     comboEl.style.display = 'block';
   } else {
     comboEl.style.display = 'none';
+  }
+  
+  // Multiplier display
+  const multEl = document.getElementById('goMultiplier');
+  if (G.scoreMultiplier > 1) {
+    multEl.textContent = G.scoreMultiplier + 'X MULTIPLIER ACTIVE';
+    multEl.style.display = 'block';
+  } else {
+    multEl.style.display = 'none';
   }
   
   showOverlay('gameOverOverlay');
@@ -1296,27 +1340,20 @@ function update() {
   // Paused — skip everything
   if (G.state === 'paused' || G.state !== 'playing') return;
   
-  const speed = G.slowMoActive ? G.gameSpeed * 0.5 : G.gameSpeed;
+  const speed = G.gameSpeed;
   
   // Day/night cycle based on score
   G.timeOfDay = Math.min(G.score / 40, 1); // Reaches full cycle at score 40
   
-  // Gravity — reversed when flipgrav active
-  const gravDir = G.gravFlipped ? -1 : 1;
-  G.bert.vy += G.gravity * gravDir;
+  G.bert.vy += G.gravity;
   
   // Hold-to-flap: continuous lift while pressing, ramps up over time
   if (G.flapHeld) {
     G.flapHoldFrames++;
     const holdPower = Math.min(G.flapHoldFrames / 18, 1);
-    const liftForce = (-0.15 - holdPower * 0.25) * (G.gravFlipped ? -1 : 1);
+    const liftForce = -0.15 - holdPower * 0.25;
     G.bert.vy += liftForce;
-    // Cap velocity so you can't rocket off screen
-    if (G.gravFlipped) {
-      if (G.bert.vy > -G.flapForce * 1.15) G.bert.vy = -G.flapForce * 1.15;
-    } else {
-      if (G.bert.vy < G.flapForce * 1.15) G.bert.vy = G.flapForce * 1.15;
-    }
+    if (G.bert.vy < G.flapForce * 1.15) G.bert.vy = G.flapForce * 1.15;
     if (G.flapHoldFrames % 4 === 0) {
       G.particles.push({
         x: G.bert.x - G.bertSize * 0.2, y: G.bert.y + G.bertSize * 0.3,
@@ -1326,12 +1363,10 @@ function update() {
     }
   }
   
-  // Terminal velocity cap (both directions)
-  if (Math.abs(G.bert.vy) > 6) G.bert.vy = Math.sign(G.bert.vy) * 6;
+  if (G.bert.vy > 6) G.bert.vy = 6;
   G.bert.y += G.bert.vy;
-  // Clamp to screen (important for gravity flip — ceiling becomes floor)
   if (G.bert.y < G.bertSize * 0.5) { G.bert.y = G.bertSize * 0.5; G.bert.vy = 0; }
-  G.bert.rotation = Math.min(Math.max(G.bert.vy * 3 * (G.gravFlipped ? -1 : 1), -30), 70);
+  G.bert.rotation = Math.min(Math.max(G.bert.vy * 3, -30), 70);
   
   // Tail animation
   G.bert.tailAngle += G.bert.tailDir * 0.3;
@@ -1388,6 +1423,7 @@ function update() {
         const nearBonus = 2;
         G.coins += nearBonus;
         G.coinsEarned += nearBonus;
+        G.nearMissesToday++;
         updateCoinDisplay();
         scoreText = 'CLOSE! +3';
         scoreColor = '#ff3860';
@@ -1435,10 +1471,9 @@ function update() {
       const coinX = p.x + G.pipeWidth / 2;
       const coinY = p.gapY + p.moveOffset + p.gapH / 2;
       const dist = Math.hypot(G.bert.x - coinX, G.bert.y - coinY);
-      const magnetRange = G.activePower === 'magnet' ? 150 : 25;
-      if (dist < magnetRange) {
+      if (dist < 25) {
         p.coinCollected = true;
-        const bonus = G.scoreMultiplier === 2 ? 4 : 2;
+        const bonus = Math.ceil(2 * G.scoreMultiplier);
         G.coins += bonus;
         updateCoinDisplay();
         G.particles.push({
@@ -1471,51 +1506,10 @@ function update() {
     if (p.life <= 0) G.particles.splice(i, 1);
   }
   
-  // Power timer
-  if (G.activePower && G.activePower !== 'shield' && G.powerTimer > 0) {
-    G.powerTimer -= 16.67;
-    const pct = Math.max(0, G.powerTimer / G.powerDuration * 100);
-    document.getElementById('powerTimerFill').style.width = pct + '%';
-    
-    if (G.powerTimer <= 0) {
-      deactivatePower();
-    }
-  }
-  
   // Collision
   if (checkCollision()) {
-    if (G.shieldActive) {
-      G.shieldActive = false;
-      G.activePower = null;
-      G.bert.vy = G.flapForce * 0.8;
-      showToast('\u{1F6E1} SHIELD USED!', 'warning');
-      // Shield break particles
-      for (let i = 0; i < 12; i++) {
-        const angle = (i / 12) * Math.PI * 2;
-        G.particles.push({
-          x: G.bert.x + Math.cos(angle) * 25,
-          y: G.bert.y + Math.sin(angle) * 25,
-          vx: Math.cos(angle) * 3,
-          vy: Math.sin(angle) * 3,
-          life: 20, maxLife: 20,
-          color: '#00e5ff',
-          size: 3,
-        });
-      }
-    } else {
-      gameOver();
-    }
+    gameOver();
   }
-}
-
-function deactivatePower() {
-  G.slowMoActive = false;
-  G.smallBert = false;
-  G.scoreMultiplier = 1;
-  G.ghostActive = false;
-  G.gravFlipped = false;
-  G.activePower = null;
-  document.getElementById('powerBar').style.display = 'none';
 }
 
 function render() {
@@ -1613,58 +1607,17 @@ function render() {
     }
     
     // Bert
-    if (G.ghostActive) ctx.globalAlpha = 0.4 + Math.sin(G.frameCount * 0.15) * 0.15;
-    if (G.gravFlipped) {
-      ctx.save();
-      ctx.translate(G.bert.x, G.bert.y);
-      ctx.scale(1, -1);
-      ctx.translate(-G.bert.x, -G.bert.y);
-    }
     drawBert(ctx);
-    if (G.gravFlipped) ctx.restore();
-    if (G.ghostActive) ctx.globalAlpha = 1;
     
-    // Shield visual
-    if (G.shieldActive) {
+    // Multiplier indicator during play
+    if (G.scoreMultiplier > 1 && G.state === 'playing') {
       ctx.save();
-      ctx.globalAlpha = 0.2 + Math.sin(G.frameCount * 0.1) * 0.1;
-      ctx.strokeStyle = '#00e5ff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(G.bert.x, G.bert.y, G.bertSize * 0.6, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 0.05;
-      ctx.fillStyle = '#00e5ff';
-      ctx.fill();
-      ctx.restore();
-    }
-    
-    // Magnet visual — pulsing ring
-    if (G.activePower === 'magnet') {
-      ctx.save();
-      const pulse = 0.8 + Math.sin(G.frameCount * 0.08) * 0.2;
-      ctx.globalAlpha = 0.12;
-      ctx.strokeStyle = '#ff44aa';
+      ctx.globalAlpha = 0.6 + Math.sin(G.frameCount * 0.08) * 0.2;
+      ctx.strokeStyle = G.scoreMultiplier >= 2 ? '#ffd700' : '#ffb800';
       ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 4]);
       ctx.beginPath();
-      ctx.arc(G.bert.x, G.bert.y, 150 * pulse, 0, Math.PI * 2);
+      ctx.arc(G.bert.x, G.bert.y, G.bertSize * 0.55, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.globalAlpha = 0.06;
-      ctx.fillStyle = '#ff44aa';
-      ctx.fill();
-      ctx.restore();
-    }
-    
-    // Ghost mode visual — flickering transparency
-    if (G.ghostActive) {
-      ctx.save();
-      ctx.globalAlpha = 0.1 + Math.sin(G.frameCount * 0.2) * 0.05;
-      ctx.fillStyle = '#aaccff';
-      ctx.beginPath();
-      ctx.arc(G.bert.x, G.bert.y, G.bertSize * 0.7, 0, Math.PI * 2);
-      ctx.fill();
       ctx.restore();
     }
   }
@@ -1858,7 +1811,7 @@ function drawCoin(ctx, x, y) {
 
 function drawBert(ctx) {
   const b = G.bert;
-  const size = G.smallBert ? G.bertSize * 0.65 : G.bertSize;
+  const size = G.bertSize;
   const skin = SKINS.find(s => s.id === G.equippedSkin) || SKINS[0];
   
   ctx.save();
@@ -1942,17 +1895,6 @@ function drawBert(ctx) {
         color: `hsl(${Math.random()*360}, 80%, 70%)`, size: 1.5,
       });
     }
-  }
-  
-  // Ghost mode visual
-  if (G.ghostActive) {
-    ctx.globalAlpha = 0.15 + Math.sin(G.frameCount * 0.15) * 0.1;
-    ctx.strokeStyle = '#88aaff';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, halfS * 1.1, halfS * 0.85, 0, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
   }
   
   ctx.restore();
@@ -2078,7 +2020,7 @@ function showMenu() {
   G.state = 'menu';
   document.getElementById('scoreDisplay').style.display = 'none';
   document.getElementById('levelIndicator').style.display = 'none';
-  document.getElementById('powerBar').style.display = 'none';
+  document.getElementById('multBar').style.display = 'none';
   showOverlay('menuOverlay');
 }
 
@@ -2130,34 +2072,25 @@ function renderShop() {
     html += '</div>';
   }
   
-  // Powers section
-  html += '<div class="shop-section">\u{26A1} POWER-UPS (one-time use)</div>';
-  for (const power of POWERS) {
-    const count = G.ownedPowers.filter(p => p === power.id).length;
-    const equipped = G.equippedPower === power.id;
-    const canBuy = G.coins >= power.price;
+  // Multipliers section
+  html += '<div class="shop-section">\u{2B50} SCORE MULTIPLIERS (3 games each)</div>';
+  for (const m of MULTIPLIERS) {
+    const uses = G.ownedMultipliers[m.id] || 0;
+    const equipped = G.equippedMultiplier === m.id;
+    const canBuy = G.coins >= m.price;
+    const cls = equipped ? 'equipped' : (uses > 0 ? 'owned' : '');
     
-    html += `<div class="shop-item ${equipped ? 'equipped' : ''}" onclick="${canBuy ? `buyPower('${power.id}')` : ''}">`;
-    html += `<div style="font-size:20px;width:32px;text-align:center;margin-right:8px;flex-shrink:0">${power.icon}</div>`;
-    html += `<div class="item-info"><div class="item-name">${power.name} ${count > 0 ? `(x${count})` : ''}</div><div class="item-desc">${power.desc}</div></div>`;
-    html += `<div class="item-price" style="opacity:${canBuy ? 1 : 0.4}">${power.price} \u{1FA99}</div>`;
-    html += '</div>';
-  }
-  
-  // Equip power section
-  if (G.ownedPowers.length > 0) {
-    html += '<div class="shop-section">\u{1F392} EQUIP FOR NEXT GAME</div>';
-    const uniquePowers = [...new Set(G.ownedPowers)];
-    for (const pid of uniquePowers) {
-      const power = POWERS.find(p => p.id === pid);
-      const count = G.ownedPowers.filter(p => p === pid).length;
-      const equipped = G.equippedPower === pid;
-      html += `<div class="shop-item ${equipped ? 'equipped' : ''}" onclick="equipPower('${pid}')">`;
-      html += `<div style="font-size:20px;width:32px;text-align:center;margin-right:8px;flex-shrink:0">${power.icon}</div>`;
-      html += `<div class="item-info"><div class="item-name">${power.name} (x${count})</div></div>`;
-      html += `<div class="item-price ${equipped ? 'equipped-label' : 'owned-label'}">${equipped ? 'EQUIPPED' : 'EQUIP'}</div>`;
-      html += '</div>';
+    html += `<div class="shop-item ${cls}" onclick="${uses > 0 ? `equipMultiplier('${m.id}')` : (canBuy ? `buyMultiplier('${m.id}')` : '')}">`;
+    html += `<div style="font-size:20px;width:32px;text-align:center;margin-right:8px;flex-shrink:0">${m.icon}</div>`;
+    html += `<div class="item-info"><div class="item-name">${m.name} ${uses > 0 ? `(${uses} left)` : ''}</div><div class="item-desc">${m.desc}</div></div>`;
+    if (equipped) {
+      html += '<div class="item-price equipped-label">ACTIVE</div>';
+    } else if (uses > 0) {
+      html += '<div class="item-price owned-label">EQUIP</div>';
+    } else {
+      html += `<div class="item-price" style="opacity:${canBuy ? 1 : 0.4}">${m.price} \u{1FA99}</div>`;
     }
+    html += '</div>';
   }
   
   document.getElementById('shopPanel').innerHTML = html;
@@ -2182,23 +2115,358 @@ function equipSkin(id) {
   renderShop();
 }
 
-function buyPower(id) {
-  const power = POWERS.find(p => p.id === id);
-  if (!power || G.coins < power.price) return;
-  G.coins -= power.price;
-  G.ownedPowers.push(id);
-  if (!G.equippedPower) G.equippedPower = id;
+function buyMultiplier(id) {
+  const m = MULTIPLIERS.find(x => x.id === id);
+  if (!m || G.coins < m.price) return;
+  G.coins -= m.price;
+  G.ownedMultipliers[id] = (G.ownedMultipliers[id] || 0) + m.uses;
+  G.equippedMultiplier = id;
   saveData();
   updateCoinDisplay();
   renderShop();
-  showToast('Purchased ' + power.name + '!', 'success');
+  showToast('Purchased ' + m.name + ' (' + m.uses + ' games)!', 'success');
 }
 
-function equipPower(id) {
-  if (!G.ownedPowers.includes(id)) return;
-  G.equippedPower = G.equippedPower === id ? null : id;
+function equipMultiplier(id) {
+  if (!G.ownedMultipliers[id] || G.ownedMultipliers[id] <= 0) return;
+  G.equippedMultiplier = G.equippedMultiplier === id ? null : id;
   saveData();
   renderShop();
+}
+
+// ========== DAILY STREAK SYSTEM ==========
+function getTodayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+
+function checkDailyLogin() {
+  const today = getTodayStr();
+  if (G.lastLoginDate === today) {
+    // Already logged in today
+    updateStreakUI();
+    return;
+  }
+  
+  // Check if yesterday was last login (continue streak)
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yStr = yesterday.getFullYear() + '-' + String(yesterday.getMonth()+1).padStart(2,'0') + '-' + String(yesterday.getDate()).padStart(2,'0');
+  
+  if (G.lastLoginDate === yStr) {
+    G.dailyStreak++;
+  } else {
+    G.dailyStreak = 1;
+  }
+  
+  G.lastLoginDate = today;
+  G.streakClaimed = false;
+  // Reset daily challenge trackers
+  G.gamesPlayedToday = 0;
+  G.nearMissesToday = 0;
+  G.bestComboToday = 0;
+  G.coinsEarnedToday = 0;
+  generateDailyChallenges();
+  saveData();
+  
+  // Show streak popup
+  setTimeout(() => {
+    const reward = getStreakReward();
+    document.getElementById('streakEmoji').textContent = G.dailyStreak >= 7 ? '\u{1F451}' : (G.dailyStreak >= 3 ? '\u{1F525}' : '\u{2B50}');
+    document.getElementById('streakTitle').textContent = 'DAY ' + G.dailyStreak + ' STREAK!';
+    document.getElementById('streakReward').innerHTML = '+' + reward + ' &#x1FA99;';
+    showOverlay('streakOverlay');
+  }, 400);
+}
+
+function getStreakReward() {
+  const idx = Math.min(G.dailyStreak - 1, STREAK_REWARDS.length - 1);
+  return STREAK_REWARDS[idx];
+}
+
+function claimStreak() {
+  if (!G.streakClaimed) {
+    G.streakClaimed = true;
+    G.coins += getStreakReward();
+    saveData();
+    updateCoinDisplay();
+    showToast('\u{1F525} Streak bonus claimed!', 'success');
+  }
+  hideAllOverlays();
+  showOverlay('menuOverlay');
+  updateStreakUI();
+}
+
+function updateStreakUI() {
+  const el = document.getElementById('menuStreak');
+  const count = document.getElementById('menuStreakCount');
+  if (G.dailyStreak > 0) {
+    el.style.display = 'block';
+    count.textContent = G.dailyStreak;
+  }
+}
+
+// ========== DAILY CHALLENGES ==========
+function generateDailyChallenges() {
+  const today = getTodayStr();
+  if (G.dailyChallengeDate === today && G.dailyChallenges.length === 3) return;
+  
+  // Seed RNG from date for consistent daily challenges
+  let seed = 0;
+  for (let i = 0; i < today.length; i++) seed = ((seed << 5) - seed) + today.charCodeAt(i);
+  const rng = () => { seed = (seed * 16807 + 0) % 2147483647; return (seed - 1) / 2147483646; };
+  
+  const challenges = [];
+  const usedTypes = new Set();
+  
+  while (challenges.length < 3) {
+    const tpl = CHALLENGE_TEMPLATES[Math.floor(rng() * CHALLENGE_TEMPLATES.length)];
+    if (usedTypes.has(tpl.type)) continue;
+    usedTypes.add(tpl.type);
+    
+    const ti = Math.floor(rng() * tpl.targets.length);
+    challenges.push({
+      type: tpl.type,
+      text: tpl.text.replace('{n}', tpl.targets[ti]),
+      target: tpl.targets[ti],
+      reward: tpl.reward[ti],
+      completed: false,
+      claimed: false,
+    });
+  }
+  
+  G.dailyChallenges = challenges;
+  G.dailyChallengeDate = today;
+  saveData();
+}
+
+function checkDailyChallenges() {
+  let changed = false;
+  for (const ch of G.dailyChallenges) {
+    if (ch.completed) continue;
+    let met = false;
+    switch(ch.type) {
+      case 'score': met = G.score >= ch.target; break;
+      case 'nearmiss': met = G.nearMissesToday >= ch.target; break;
+      case 'combo': met = G.bestCombo >= ch.target || G.bestComboToday >= ch.target; break;
+      case 'coins': met = G.coinsEarned >= ch.target; break;
+      case 'games': met = G.gamesPlayedToday >= ch.target; break;
+      case 'level': met = G.level >= ch.target; break;
+    }
+    if (met) {
+      ch.completed = true;
+      changed = true;
+      showToast('\u{1F3AF} Challenge complete!', 'success');
+    }
+  }
+  if (changed) saveData();
+}
+
+function claimChallengeReward(idx) {
+  const ch = G.dailyChallenges[idx];
+  if (!ch || !ch.completed || ch.claimed) return;
+  ch.claimed = true;
+  G.coins += ch.reward;
+  saveData();
+  updateCoinDisplay();
+  showToast('+' + ch.reward + ' coins!', 'success');
+  renderChallenges();
+}
+
+function showChallenges() {
+  const today = getTodayStr();
+  if (G.dailyChallengeDate !== today) generateDailyChallenges();
+  renderChallenges();
+  hideAllOverlays();
+  showOverlay('challengeOverlay');
+}
+
+function renderChallenges() {
+  let html = '';
+  const resetHr = 24 - new Date().getHours();
+  html += `<div style="text-align:center;font-size:6px;color:var(--text-dim);margin-bottom:12px">Resets in ~${resetHr}h</div>`;
+  
+  G.dailyChallenges.forEach((ch, i) => {
+    const done = ch.completed;
+    const claimed = ch.claimed;
+    const cls = claimed ? 'owned' : (done ? 'equipped' : '');
+    html += `<div class="shop-item ${cls}" onclick="${done && !claimed ? `claimChallengeReward(${i})` : ''}">`;
+    html += `<div style="font-size:18px;width:32px;text-align:center;margin-right:8px;flex-shrink:0">${claimed ? '\u{2705}' : (done ? '\u{1F381}' : '\u{1F3AF}')}</div>`;
+    html += `<div class="item-info"><div class="item-name" style="font-size:6px">${ch.text}</div>`;
+    html += `<div class="item-desc">${claimed ? 'CLAIMED' : (done ? 'TAP TO CLAIM' : 'IN PROGRESS')}</div></div>`;
+    html += `<div class="item-price">${ch.reward} \u{1FA99}</div>`;
+    html += '</div>';
+  });
+  
+  document.getElementById('challengeList').innerHTML = html;
+}
+
+// ========== SHARE SCORE CARD ==========
+function shareScoreCard() {
+  const w = 600, h = 800;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  
+  // Background gradient
+  const grad = x.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, '#0a0e1a');
+  grad.addColorStop(0.5, '#141829');
+  grad.addColorStop(1, '#0a0e1a');
+  x.fillStyle = grad;
+  x.fillRect(0, 0, w, h);
+  
+  // Border glow
+  x.strokeStyle = '#ff6b35';
+  x.lineWidth = 3;
+  x.shadowColor = '#ff6b35';
+  x.shadowBlur = 20;
+  x.strokeRect(12, 12, w - 24, h - 24);
+  x.shadowBlur = 0;
+  
+  // Inner frame
+  x.strokeStyle = 'rgba(255,107,53,0.3)';
+  x.lineWidth = 1;
+  x.strokeRect(24, 24, w - 48, h - 48);
+  
+  // Title
+  x.font = 'bold 48px "Press Start 2P", monospace';
+  x.textAlign = 'center';
+  x.fillStyle = '#ff6b35';
+  x.shadowColor = 'rgba(255,107,53,0.6)';
+  x.shadowBlur = 15;
+  x.fillText('FLAPPY', w/2, 100);
+  x.fillText('BERT', w/2, 155);
+  x.shadowBlur = 0;
+  
+  // Subtitle
+  x.font = '14px "Press Start 2P", monospace';
+  x.fillStyle = '#ffb800';
+  x.fillText('FLAP TO EARN', w/2, 190);
+  
+  // Bert sprite
+  if (bertSprite.complete) {
+    const skin = SKINS.find(s => s.id === G.equippedSkin) || SKINS[0];
+    x.save();
+    x.translate(w/2, 280);
+    // Draw Bert large
+    const sz = 100;
+    x.drawImage(bertSprite, -sz*0.6, -sz/2, sz*1.2, sz);
+    // Tint overlay
+    if (G.equippedSkin !== 'default') {
+      x.globalCompositeOperation = 'source-atop';
+      x.globalAlpha = 0.4;
+      x.fillStyle = skin.color;
+      x.fillRect(-sz*0.6, -sz/2, sz*1.2, sz);
+      x.globalCompositeOperation = 'source-over';
+      x.globalAlpha = 1;
+    }
+    x.restore();
+  }
+  
+  // Score section
+  x.font = '14px "Press Start 2P", monospace';
+  x.fillStyle = '#7a7e9a';
+  x.fillText('SCORE', w/2, 370);
+  
+  x.font = 'bold 72px "Press Start 2P", monospace';
+  x.fillStyle = '#ffb800';
+  x.shadowColor = 'rgba(255,184,0,0.5)';
+  x.shadowBlur = 20;
+  x.fillText(String(G.score), w/2, 440);
+  x.shadowBlur = 0;
+  
+  // Medal
+  const medals = { 50: '\u{1F48E}', 30: '\u{1F947}', 20: '\u{1F948}', 10: '\u{1F949}' };
+  for (const [threshold, emoji] of Object.entries(medals).sort((a,b) => b[0]-a[0])) {
+    if (G.score >= parseInt(threshold)) {
+      x.font = '40px serif';
+      x.fillText(emoji, w/2, 490);
+      break;
+    }
+  }
+  
+  // Stats grid
+  const stats = [
+    ['BEST', String(G.bestScore)],
+    ['LEVEL', String(G.level)],
+    ['STREAK', G.bestCombo + 'x'],
+    ['COINS', '+' + G.coinsEarned],
+  ];
+  
+  x.font = '10px "Press Start 2P", monospace';
+  const gridY = 530;
+  const colW = w / 4;
+  stats.forEach(([label, val], i) => {
+    const cx = colW * i + colW/2;
+    x.fillStyle = '#7a7e9a';
+    x.fillText(label, cx, gridY);
+    x.font = '16px "Press Start 2P", monospace';
+    x.fillStyle = '#00e5ff';
+    x.fillText(val, cx, gridY + 30);
+    x.font = '10px "Press Start 2P", monospace';
+  });
+  
+  // Multiplier badge
+  if (G.scoreMultiplier > 1) {
+    x.font = 'bold 20px "Press Start 2P", monospace';
+    x.fillStyle = '#ffd700';
+    x.fillText(G.scoreMultiplier + 'X MULTIPLIER', w/2, 610);
+  }
+  
+  // Daily streak
+  if (G.dailyStreak > 0) {
+    x.font = '14px "Press Start 2P", monospace';
+    x.fillStyle = '#ff6b35';
+    x.fillText('\u{1F525} ' + G.dailyStreak + ' DAY STREAK', w/2, 650);
+  }
+  
+  // Skin name
+  const skinName = (SKINS.find(s => s.id === G.equippedSkin) || SKINS[0]).name;
+  x.font = '10px "Press Start 2P", monospace';
+  x.fillStyle = '#7a7e9a';
+  x.fillText(skinName, w/2, 690);
+  
+  // Player name
+  x.font = '16px "Press Start 2P", monospace';
+  x.fillStyle = '#e8e8f0';
+  x.fillText(G.playerName, w/2, 720);
+  
+  // Footer / branding
+  x.font = '10px "Press Start 2P", monospace';
+  x.fillStyle = '#4a4e6a';
+  x.fillText('play at flappy-bert.onrender.com', w/2, 770);
+  
+  // Convert to shareable
+  c.toBlob(blob => {
+    if (!blob) return;
+    
+    // Try native share (mobile)
+    if (navigator.share && navigator.canShare) {
+      const file = new File([blob], 'flappy-bert-score.png', { type: 'image/png' });
+      if (navigator.canShare({ files: [file] })) {
+        navigator.share({
+          title: 'Flappy Bert - Score ' + G.score,
+          text: 'I scored ' + G.score + ' in Flappy Bert! Can you beat me? \u{1F426}\u{1F525}',
+          files: [file],
+        }).catch(() => downloadScoreCard(blob));
+        return;
+      }
+    }
+    
+    // Fallback: download
+    downloadScoreCard(blob);
+  }, 'image/png');
+}
+
+function downloadScoreCard(blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'flappy-bert-' + G.score + '.png';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+  showToast('\u{1F4F7} Score card saved!', 'success');
 }
 
 function renderLeaderboard() {
