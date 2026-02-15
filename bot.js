@@ -20,10 +20,12 @@
 //   GET  /api/player/:id  — Player stats JSON
 // ─────────────────────────────────────────────────────────────────────
 
-require('dotenv').config?.();
+// Load .env file if available (local dev only — Render injects env vars natively)
+try { require('dotenv').config(); } catch(e) {}
 const TelegramBot = require('node-telegram-bot-api');
 const express     = require('express');
 const cors        = require('cors');
+const path        = require('path');
 const db          = require('./db');
 const { renderLeaderboardCard, renderPlayerCard } = require('./leaderboard-card');
 
@@ -360,6 +362,12 @@ app.get('/api/player/:id/card', (req, res) => {
 
 // Health check
 app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
+
+// Serve the game HTML from the same server
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('/game', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'flappy_bert.html'));
+});
 
 // ── Start server ────────────────────────────────────────────────────
 app.listen(PORT, () => {
