@@ -583,7 +583,7 @@ function resizeCanvas() {
   G.canvas.height = G.height * dpr;
   G.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   G.bertSize = Math.min(40, G.width * 0.1);
-  G.groundHeight = Math.min(60, G.height * 0.08);
+  G.groundHeight = Math.max(50, Math.min(70, G.height * 0.1));
 }
 
 function generateStars() {
@@ -1243,6 +1243,9 @@ function render() {
   const w = G.width;
   const h = G.height;
   
+  // Clear canvas fully to prevent ghosting
+  ctx.clearRect(0, 0, w, h);
+  
   // Sky gradient
   const skyGrad = ctx.createLinearGradient(0, 0, 0, h);
   skyGrad.addColorStop(0, '#050818');
@@ -1364,56 +1367,64 @@ function drawCloud(ctx, x, y, size) {
 }
 
 function drawBackground(ctx, w, h) {
-  const gndY = h - G.groundHeight;
+  const gndY = (h - G.groundHeight) | 0;
   const playScroll = G.state === 'playing' ? G.ground.offset : 0;
   
-  // Far mountain range (very slow parallax)
-  const mtScroll1 = playScroll * 0.05;
-  ctx.fillStyle = 'rgba(12,16,40,0.7)';
+  // Clip everything above the ground line
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, w, gndY);
+  ctx.clip();
+  
+  // Far mountain range — opaque, no transparency
+  const mtScroll1 = (playScroll * 0.05) | 0;
+  ctx.fillStyle = '#0b0f28';
   ctx.beginPath();
   ctx.moveTo(0, gndY);
   for (let x = 0; x <= w + 40; x += 4) {
     const rx = x + mtScroll1;
-    const mh = 80 + Math.sin(rx * 0.006) * 40 + Math.sin(rx * 0.015) * 25 + Math.sin(rx * 0.003) * 15;
+    const mh = (80 + Math.sin(rx * 0.006) * 40 + Math.sin(rx * 0.015) * 25 + Math.sin(rx * 0.003) * 15) | 0;
     ctx.lineTo(x, gndY - mh);
   }
   ctx.lineTo(w, gndY);
+  ctx.closePath();
   ctx.fill();
   
   // Mid mountain range
-  const mtScroll2 = playScroll * 0.1;
-  ctx.fillStyle = 'rgba(16,20,45,0.8)';
+  const mtScroll2 = (playScroll * 0.1) | 0;
+  ctx.fillStyle = '#0e1230';
   ctx.beginPath();
   ctx.moveTo(0, gndY);
   for (let x = 0; x <= w + 40; x += 4) {
     const rx = x + mtScroll2;
-    const mh = 55 + Math.sin(rx * 0.01 + 2) * 30 + Math.sin(rx * 0.025) * 18;
+    const mh = (55 + Math.sin(rx * 0.01 + 2) * 30 + Math.sin(rx * 0.025) * 18) | 0;
     ctx.lineTo(x, gndY - mh);
   }
   ctx.lineTo(w, gndY);
+  ctx.closePath();
   ctx.fill();
   
-  // Far buildings (slow scroll)
-  const bldScroll1 = playScroll * 0.15;
-  ctx.fillStyle = 'rgba(14,17,38,0.85)';
-  for (let x = -(bldScroll1 % 100); x < w + 100; x += 100) {
-    const seed = Math.sin(x * 0.077 + 5) * 10000;
-    const bw = 35 + (seed % 25);
-    const bh = 50 + Math.abs(Math.sin(x * 0.03 + 1)) * 60;
-    ctx.fillRect(x, gndY - bh, bw, bh);
+  // Far buildings (slow scroll) — fully opaque
+  const bldScroll1 = (playScroll * 0.15) | 0;
+  const bldSpacing1 = 100;
+  const bldOff1 = bldScroll1 % bldSpacing1;
+  for (let x = -bldOff1 - bldSpacing1; x < w + bldSpacing1; x += bldSpacing1) {
+    const xi = x | 0;
+    const seed = Math.sin(xi * 0.077 + 5) * 10000;
+    const bw = (35 + Math.abs(seed % 25)) | 0;
+    const bh = (50 + Math.abs(Math.sin(xi * 0.03 + 1)) * 60) | 0;
+    // Building body
+    ctx.fillStyle = '#0d1026';
+    ctx.fillRect(xi, gndY - bh, bw, bh);
     // Roof detail
     if (bh > 80) {
-      ctx.fillRect(x + bw * 0.3, gndY - bh - 8, 4, 8);
-      ctx.fillRect(x + bw * 0.6, gndY - bh - 12, 3, 12);
+      ctx.fillRect(xi + ((bw * 0.3) | 0), gndY - bh - 8, 4, 8);
+      ctx.fillRect(xi + ((bw * 0.6) | 0), gndY - bh - 12, 3, 12);
     }
-  }
-  // Far building windows
-  ctx.fillStyle = 'rgba(255,200,80,0.06)';
-  for (let x = -(bldScroll1 % 100); x < w + 100; x += 100) {
-    const bw = 35 + ((Math.sin(x * 0.077 + 5) * 10000) % 25);
-    const bh = 50 + Math.abs(Math.sin(x * 0.03 + 1)) * 60;
+    // Windows
+    ctx.fillStyle = '#181c2e';
     for (let wy = gndY - bh + 10; wy < gndY - 5; wy += 14) {
-      for (let wx = x + 5; wx < x + bw - 5; wx += 10) {
+      for (let wx = xi + 5; wx < xi + bw - 5; wx += 10) {
         if (Math.sin(wx * 3.7 + wy * 2.3) > 0) {
           ctx.fillRect(wx, wy, 4, 5);
         }
@@ -1421,28 +1432,39 @@ function drawBackground(ctx, w, h) {
     }
   }
   
-  // Near buildings (faster scroll, more detail)
-  const bldScroll2 = playScroll * 0.3;
-  ctx.fillStyle = 'rgba(10,13,30,0.92)';
-  for (let x = -(bldScroll2 % 75); x < w + 75; x += 75) {
-    const seed = Math.sin(x * 0.093 + 3) * 10000;
-    const bw = 40 + (seed % 20);
-    const bh = 30 + Math.abs(Math.sin(x * 0.047 + 2)) * 40;
-    ctx.fillRect(x, gndY - bh, bw, bh);
-  }
-  // Near building windows (brighter, warmer)
-  ctx.fillStyle = 'rgba(255,190,80,0.1)';
-  for (let x = -(bldScroll2 % 75); x < w + 75; x += 75) {
-    const bw = 40 + ((Math.sin(x * 0.093 + 3) * 10000) % 20);
-    const bh = 30 + Math.abs(Math.sin(x * 0.047 + 2)) * 40;
+  // Near buildings (faster scroll) — fully opaque
+  const bldScroll2 = (playScroll * 0.3) | 0;
+  const bldSpacing2 = 75;
+  const bldOff2 = bldScroll2 % bldSpacing2;
+  for (let x = -bldOff2 - bldSpacing2; x < w + bldSpacing2; x += bldSpacing2) {
+    const xi = x | 0;
+    const seed = Math.sin(xi * 0.093 + 3) * 10000;
+    const bw = (40 + Math.abs(seed % 20)) | 0;
+    const bh = (30 + Math.abs(Math.sin(xi * 0.047 + 2)) * 40) | 0;
+    // Building body
+    ctx.fillStyle = '#090c1e';
+    ctx.fillRect(xi, gndY - bh, bw, bh);
+    // Windows — warm lit colour
+    ctx.fillStyle = '#1a1830';
     for (let wy = gndY - bh + 8; wy < gndY - 4; wy += 11) {
-      for (let wx = x + 5; wx < x + bw - 5; wx += 12) {
+      for (let wx = xi + 5; wx < xi + bw - 5; wx += 12) {
         if (Math.sin(wx * 5.1 + wy * 1.7) > -0.2) {
           ctx.fillRect(wx, wy, 5, 5);
         }
       }
     }
+    // Lit windows (randomly a few warm ones)
+    ctx.fillStyle = '#2a2218';
+    for (let wy = gndY - bh + 8; wy < gndY - 4; wy += 11) {
+      for (let wx = xi + 5; wx < xi + bw - 5; wx += 12) {
+        if (Math.sin(wx * 7.3 + wy * 4.1) > 0.7) {
+          ctx.fillRect(wx, wy, 5, 5);
+        }
+      }
+    }
   }
+  
+  ctx.restore(); // Remove clipping
 }
 
 function drawPipe(ctx, p) {
@@ -1649,9 +1671,14 @@ function drawPixelBert(ctx, halfS, size, color, tailAngle) {
 }
 
 function drawGround(ctx, w, h) {
-  const gndY = h - G.groundHeight;
+  const gndY = (h - G.groundHeight) | 0;
+  const gndH = (G.groundHeight + 2) | 0;
   
-  // Ground gradient - richer earth tones
+  // Solid opaque fill to prevent bleed-through
+  ctx.fillStyle = '#2a1a0a';
+  ctx.fillRect(0, gndY, w, gndH);
+  
+  // Ground gradient
   const gndGrad = ctx.createLinearGradient(0, gndY, 0, h);
   gndGrad.addColorStop(0, '#3a5a2a');
   gndGrad.addColorStop(0.05, '#2e4820');
@@ -1659,24 +1686,26 @@ function drawGround(ctx, w, h) {
   gndGrad.addColorStop(0.5, '#2a1a0a');
   gndGrad.addColorStop(1, '#1a0a00');
   ctx.fillStyle = gndGrad;
-  ctx.fillRect(0, gndY, w, G.groundHeight);
+  ctx.fillRect(0, gndY, w, gndH);
   
   // Scrolling dirt texture
-  ctx.fillStyle = 'rgba(255,255,255,0.03)';
-  const offset = G.ground.offset;
-  for (let x = -offset; x < w + 32; x += 32) {
-    ctx.fillRect(x, gndY + 8, 16, 3);
-    ctx.fillRect(x + 16, gndY + 16, 16, 3);
-    ctx.fillRect(x + 8, gndY + 24, 12, 2);
+  const offset = G.ground.offset | 0;
+  ctx.fillStyle = '#2f1f0f';
+  for (let x = -(offset % 32); x < w + 32; x += 32) {
+    const xi = x | 0;
+    ctx.fillRect(xi, gndY + 8, 16, 3);
+    ctx.fillRect(xi + 16, gndY + 16, 16, 3);
+    ctx.fillRect(xi + 8, gndY + 24, 12, 2);
   }
   
   // Grass tufts along top
   ctx.fillStyle = '#4a7a30';
-  for (let x = -offset % 12; x < w + 12; x += 12) {
-    const gh = 3 + Math.sin(x * 0.3) * 2;
-    ctx.fillRect(x, gndY - 1, 3, gh + 1);
-    ctx.fillRect(x + 5, gndY - 1, 2, gh);
-    ctx.fillRect(x + 8, gndY - 1, 3, gh + 0.5);
+  for (let x = -(offset % 12); x < w + 12; x += 12) {
+    const xi = x | 0;
+    const gh = (3 + Math.sin(x * 0.3) * 2) | 0;
+    ctx.fillRect(xi, gndY - 1, 3, gh + 1);
+    ctx.fillRect(xi + 5, gndY - 1, 2, gh);
+    ctx.fillRect(xi + 8, gndY - 1, 3, gh + 1);
   }
   
   // Green top edge
