@@ -507,6 +507,7 @@ const G = {
   particles: [],
   stars: [],
   ground: { offset: 0 },
+  scrollDistance: 0,
   score: 0,
   bestScore: 0,
   coins: 0,
@@ -557,6 +558,9 @@ const G = {
   bestCombo: 0,
   // Pause
   paused: false,
+  // Power states
+  ghostActive: false,
+  gravFlipped: false,
   // Tutorial
   hasPlayedBefore: false,
 };
@@ -578,7 +582,9 @@ const POWERS = [
   { id: 'slowmo', name: 'SLOW-MO', desc: 'Slows pipes for 5 seconds', price: 100, duration: 5000, icon: '\u{23F3}' },
   { id: 'small', name: 'MINI BERT', desc: 'Smaller hitbox for 8 seconds', price: 120, duration: 8000, icon: '\u{1F4A0}' },
   { id: 'double', name: '2X COINS', desc: 'Double coins for 10 seconds', price: 80, duration: 10000, icon: '\u{2728}' },
-  { id: 'magnet', name: 'COIN MAGNET', desc: 'Attract bonus coins', price: 150, duration: 8000, icon: '\u{1F9F2}' },
+  { id: 'magnet', name: 'COIN MAGNET', desc: 'Attract coins from far away', price: 150, duration: 8000, icon: '\u{1F9F2}' },
+  { id: 'ghost', name: 'GHOST MODE', desc: 'Phase through pipes for 4s', price: 200, duration: 4000, icon: '\u{1F47B}' },
+  { id: 'flipgrav', name: 'GRAVITY FLIP', desc: 'Reverse gravity for 6s', price: 180, duration: 6000, icon: '\u{1F504}' },
 ];
 
 // ========== SPRITE LOADING ==========
@@ -889,12 +895,15 @@ function startGame() {
   G.gameSpeed = G.baseSpeed;
   G.pipeGap = G.basePipeGap;
   G.pipeTimer = -50;
+  G.scrollDistance = 0;
   G.activePower = null;
   G.powerTimer = 0;
   G.shieldActive = false;
   G.slowMoActive = false;
   G.scoreMultiplier = 1;
   G.smallBert = false;
+  G.ghostActive = false;
+  G.gravFlipped = false;
   G.flapHeld = false;
   G.flapHoldFrames = 0;
   G.combo = 0;
@@ -958,7 +967,9 @@ function onFlapStart() {
     G.flapHeld = true;
     G.flapHoldFrames = 0;
     
-    G.bert.vy = G.flapForce * 0.65;
+    // Flap direction reverses with gravity
+    const flapDir = G.gravFlipped ? -1 : 1;
+    G.bert.vy = G.flapForce * 0.65 * flapDir;
     G.bert.tailDir *= -1;
     AudioSystem.playFlap();
     
@@ -1039,6 +1050,8 @@ function activatePower(powerId) {
   if (powerId === 'slowmo') G.slowMoActive = true;
   if (powerId === 'small') G.smallBert = true;
   if (powerId === 'double') G.scoreMultiplier = 2;
+  if (powerId === 'ghost') G.ghostActive = true;
+  if (powerId === 'flipgrav') G.gravFlipped = true;
   
   if (power.duration > 0) {
     document.getElementById('powerBar').style.display = 'flex';
@@ -1094,6 +1107,9 @@ function checkCollision() {
   if (b.y + hitR > G.height - G.groundHeight || b.y - hitR < 0) {
     return true;
   }
+  
+  // Ghost mode — phase through pipes, no pipe collision
+  if (G.ghostActive) return false;
   
   // Pipes
   for (const p of G.pipes) {
@@ -1285,19 +1301,22 @@ function update() {
   // Day/night cycle based on score
   G.timeOfDay = Math.min(G.score / 40, 1); // Reaches full cycle at score 40
   
-  // Bert physics
-  G.bert.vy += G.gravity;
+  // Gravity — reversed when flipgrav active
+  const gravDir = G.gravFlipped ? -1 : 1;
+  G.bert.vy += G.gravity * gravDir;
   
   // Hold-to-flap: continuous lift while pressing, ramps up over time
   if (G.flapHeld) {
     G.flapHoldFrames++;
-    // Ramp from light to strong over ~18 frames, then cap
     const holdPower = Math.min(G.flapHoldFrames / 18, 1);
-    const liftForce = -0.15 - holdPower * 0.25; // -0.15 to -0.40 per frame
+    const liftForce = (-0.15 - holdPower * 0.25) * (G.gravFlipped ? -1 : 1);
     G.bert.vy += liftForce;
-    // Cap upward velocity so you can't rocket off screen
-    if (G.bert.vy < G.flapForce * 1.15) G.bert.vy = G.flapForce * 1.15;
-    // Extra particles while holding
+    // Cap velocity so you can't rocket off screen
+    if (G.gravFlipped) {
+      if (G.bert.vy > -G.flapForce * 1.15) G.bert.vy = -G.flapForce * 1.15;
+    } else {
+      if (G.bert.vy < G.flapForce * 1.15) G.bert.vy = G.flapForce * 1.15;
+    }
     if (G.flapHoldFrames % 4 === 0) {
       G.particles.push({
         x: G.bert.x - G.bertSize * 0.2, y: G.bert.y + G.bertSize * 0.3,
@@ -1307,9 +1326,12 @@ function update() {
     }
   }
   
-  if (G.bert.vy > 6) G.bert.vy = 6; // Terminal velocity cap
+  // Terminal velocity cap (both directions)
+  if (Math.abs(G.bert.vy) > 6) G.bert.vy = Math.sign(G.bert.vy) * 6;
   G.bert.y += G.bert.vy;
-  G.bert.rotation = Math.min(Math.max(G.bert.vy * 3, -30), 70);
+  // Clamp to screen (important for gravity flip — ceiling becomes floor)
+  if (G.bert.y < G.bertSize * 0.5) { G.bert.y = G.bertSize * 0.5; G.bert.vy = 0; }
+  G.bert.rotation = Math.min(Math.max(G.bert.vy * 3 * (G.gravFlipped ? -1 : 1), -30), 70);
   
   // Tail animation
   G.bert.tailAngle += G.bert.tailDir * 0.3;
@@ -1413,7 +1435,7 @@ function update() {
       const coinX = p.x + G.pipeWidth / 2;
       const coinY = p.gapY + p.moveOffset + p.gapH / 2;
       const dist = Math.hypot(G.bert.x - coinX, G.bert.y - coinY);
-      const magnetRange = G.activePower === 'magnet' ? 80 : 25;
+      const magnetRange = G.activePower === 'magnet' ? 150 : 25;
       if (dist < magnetRange) {
         p.coinCollected = true;
         const bonus = G.scoreMultiplier === 2 ? 4 : 2;
@@ -1438,6 +1460,7 @@ function update() {
   
   // Ground scroll
   G.ground.offset = (G.ground.offset + speed) % 32;
+  G.scrollDistance += speed;
   
   // Particles
   for (let i = G.particles.length - 1; i >= 0; i--) {
@@ -1489,6 +1512,8 @@ function deactivatePower() {
   G.slowMoActive = false;
   G.smallBert = false;
   G.scoreMultiplier = 1;
+  G.ghostActive = false;
+  G.gravFlipped = false;
   G.activePower = null;
   document.getElementById('powerBar').style.display = 'none';
 }
@@ -1588,7 +1613,16 @@ function render() {
     }
     
     // Bert
+    if (G.ghostActive) ctx.globalAlpha = 0.4 + Math.sin(G.frameCount * 0.15) * 0.15;
+    if (G.gravFlipped) {
+      ctx.save();
+      ctx.translate(G.bert.x, G.bert.y);
+      ctx.scale(1, -1);
+      ctx.translate(-G.bert.x, -G.bert.y);
+    }
     drawBert(ctx);
+    if (G.gravFlipped) ctx.restore();
+    if (G.ghostActive) ctx.globalAlpha = 1;
     
     // Shield visual
     if (G.shieldActive) {
@@ -1601,6 +1635,35 @@ function render() {
       ctx.stroke();
       ctx.globalAlpha = 0.05;
       ctx.fillStyle = '#00e5ff';
+      ctx.fill();
+      ctx.restore();
+    }
+    
+    // Magnet visual — pulsing ring
+    if (G.activePower === 'magnet') {
+      ctx.save();
+      const pulse = 0.8 + Math.sin(G.frameCount * 0.08) * 0.2;
+      ctx.globalAlpha = 0.12;
+      ctx.strokeStyle = '#ff44aa';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(G.bert.x, G.bert.y, 150 * pulse, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.06;
+      ctx.fillStyle = '#ff44aa';
+      ctx.fill();
+      ctx.restore();
+    }
+    
+    // Ghost mode visual — flickering transparency
+    if (G.ghostActive) {
+      ctx.save();
+      ctx.globalAlpha = 0.1 + Math.sin(G.frameCount * 0.2) * 0.05;
+      ctx.fillStyle = '#aaccff';
+      ctx.beginPath();
+      ctx.arc(G.bert.x, G.bert.y, G.bertSize * 0.7, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -1644,21 +1707,19 @@ function drawCloud(ctx, x, y, size) {
 
 function drawBackground(ctx, w, h) {
   const gndY = (h - G.groundHeight) | 0;
-  const playScroll = G.state === 'playing' ? G.ground.offset : 0;
+  const scroll = G.scrollDistance || 0;
   
-  // Clip everything above the ground line
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 0, w, gndY);
   ctx.clip();
   
-  // Far mountain range — opaque, no transparency
-  const mtScroll1 = (playScroll * 0.05) | 0;
+  // Far mountain range
   ctx.fillStyle = '#0b0f28';
   ctx.beginPath();
   ctx.moveTo(0, gndY);
   for (let x = 0; x <= w + 40; x += 4) {
-    const rx = x + mtScroll1;
+    const rx = x + scroll * 0.05;
     const mh = (80 + Math.sin(rx * 0.006) * 40 + Math.sin(rx * 0.015) * 25 + Math.sin(rx * 0.003) * 15) | 0;
     ctx.lineTo(x, gndY - mh);
   }
@@ -1667,12 +1728,11 @@ function drawBackground(ctx, w, h) {
   ctx.fill();
   
   // Mid mountain range
-  const mtScroll2 = (playScroll * 0.1) | 0;
   ctx.fillStyle = '#0e1230';
   ctx.beginPath();
   ctx.moveTo(0, gndY);
   for (let x = 0; x <= w + 40; x += 4) {
-    const rx = x + mtScroll2;
+    const rx = x + scroll * 0.1;
     const mh = (55 + Math.sin(rx * 0.01 + 2) * 30 + Math.sin(rx * 0.025) * 18) | 0;
     ctx.lineTo(x, gndY - mh);
   }
@@ -1680,67 +1740,63 @@ function drawBackground(ctx, w, h) {
   ctx.closePath();
   ctx.fill();
   
-  // Far buildings (slow scroll) — fully opaque
-  const bldScroll1 = (playScroll * 0.15) | 0;
-  const bldSpacing1 = 100;
-  const bldOff1 = bldScroll1 % bldSpacing1;
-  for (let x = -bldOff1 - bldSpacing1; x < w + bldSpacing1; x += bldSpacing1) {
-    const xi = x | 0;
-    const seed = Math.sin(xi * 0.077 + 5) * 10000;
-    const bw = (35 + Math.abs(seed % 25)) | 0;
-    const bh = (50 + Math.abs(Math.sin(xi * 0.03 + 1)) * 60) | 0;
-    // Building body
+  // Far buildings — world-index for stable sizes
+  const bldScroll1 = scroll * 0.15;
+  const sp1 = 100;
+  const startIdx1 = Math.floor(bldScroll1 / sp1) - 1;
+  const endIdx1 = startIdx1 + Math.ceil(w / sp1) + 3;
+  for (let idx = startIdx1; idx <= endIdx1; idx++) {
+    const screenX = (idx * sp1 - bldScroll1) | 0;
+    const s = Math.sin(idx * 7.7 + 5) * 10000;
+    const bw = (35 + Math.abs(s % 25)) | 0;
+    const bh = (50 + Math.abs(Math.sin(idx * 2.3 + 1)) * 60) | 0;
     ctx.fillStyle = '#0d1026';
-    ctx.fillRect(xi, gndY - bh, bw, bh);
-    // Roof detail
+    ctx.fillRect(screenX, gndY - bh, bw, bh);
     if (bh > 80) {
-      ctx.fillRect(xi + ((bw * 0.3) | 0), gndY - bh - 8, 4, 8);
-      ctx.fillRect(xi + ((bw * 0.6) | 0), gndY - bh - 12, 3, 12);
+      ctx.fillRect(screenX + ((bw * 0.3) | 0), gndY - bh - 8, 4, 8);
+      ctx.fillRect(screenX + ((bw * 0.6) | 0), gndY - bh - 12, 3, 12);
     }
-    // Windows
     ctx.fillStyle = '#181c2e';
     for (let wy = gndY - bh + 10; wy < gndY - 5; wy += 14) {
-      for (let wx = xi + 5; wx < xi + bw - 5; wx += 10) {
-        if (Math.sin(wx * 3.7 + wy * 2.3) > 0) {
+      for (let wx = screenX + 5; wx < screenX + bw - 5; wx += 10) {
+        if (Math.sin((idx * sp1 + (wx - screenX)) * 0.37 + wy * 2.3) > 0) {
           ctx.fillRect(wx, wy, 4, 5);
         }
       }
     }
   }
   
-  // Near buildings (faster scroll) — fully opaque
-  const bldScroll2 = (playScroll * 0.3) | 0;
-  const bldSpacing2 = 75;
-  const bldOff2 = bldScroll2 % bldSpacing2;
-  for (let x = -bldOff2 - bldSpacing2; x < w + bldSpacing2; x += bldSpacing2) {
-    const xi = x | 0;
-    const seed = Math.sin(xi * 0.093 + 3) * 10000;
-    const bw = (40 + Math.abs(seed % 20)) | 0;
-    const bh = (30 + Math.abs(Math.sin(xi * 0.047 + 2)) * 40) | 0;
-    // Building body
+  // Near buildings
+  const bldScroll2 = scroll * 0.3;
+  const sp2 = 75;
+  const startIdx2 = Math.floor(bldScroll2 / sp2) - 1;
+  const endIdx2 = startIdx2 + Math.ceil(w / sp2) + 3;
+  for (let idx = startIdx2; idx <= endIdx2; idx++) {
+    const screenX = (idx * sp2 - bldScroll2) | 0;
+    const s = Math.sin(idx * 9.3 + 3) * 10000;
+    const bw = (40 + Math.abs(s % 20)) | 0;
+    const bh = (30 + Math.abs(Math.sin(idx * 3.1 + 2)) * 40) | 0;
     ctx.fillStyle = '#090c1e';
-    ctx.fillRect(xi, gndY - bh, bw, bh);
-    // Windows — warm lit colour
+    ctx.fillRect(screenX, gndY - bh, bw, bh);
     ctx.fillStyle = '#1a1830';
     for (let wy = gndY - bh + 8; wy < gndY - 4; wy += 11) {
-      for (let wx = xi + 5; wx < xi + bw - 5; wx += 12) {
-        if (Math.sin(wx * 5.1 + wy * 1.7) > -0.2) {
+      for (let wx = screenX + 5; wx < screenX + bw - 5; wx += 12) {
+        if (Math.sin((idx * sp2 + (wx - screenX)) * 0.51 + wy * 1.7) > -0.2) {
           ctx.fillRect(wx, wy, 5, 5);
         }
       }
     }
-    // Lit windows (randomly a few warm ones)
     ctx.fillStyle = '#2a2218';
     for (let wy = gndY - bh + 8; wy < gndY - 4; wy += 11) {
-      for (let wx = xi + 5; wx < xi + bw - 5; wx += 12) {
-        if (Math.sin(wx * 7.3 + wy * 4.1) > 0.7) {
+      for (let wx = screenX + 5; wx < screenX + bw - 5; wx += 12) {
+        if (Math.sin((idx * sp2 + (wx - screenX)) * 0.73 + wy * 4.1) > 0.7) {
           ctx.fillRect(wx, wy, 5, 5);
         }
       }
     }
   }
   
-  ctx.restore(); // Remove clipping
+  ctx.restore();
 }
 
 function drawPipe(ctx, p) {
@@ -1810,48 +1866,59 @@ function drawBert(ctx) {
   ctx.rotate(b.rotation * Math.PI / 180);
   
   const halfS = size / 2;
+  const sprW = (size * 1.2) | 0;
+  const sprH = size | 0;
   
-  // Draw Bert sprite if loaded, otherwise fallback to pixel art
   if (bertSprite.complete && bertSprite.naturalWidth > 0) {
-    // Apply skin tint
     if (G.equippedSkin !== 'default') {
-      // Draw tinted version
-      ctx.globalAlpha = 0.85;
-      ctx.drawImage(bertSprite, -halfS * 1.2, -halfS, size * 1.2, size);
-      ctx.globalCompositeOperation = 'multiply';
-      ctx.fillStyle = skin.color;
-      ctx.fillRect(-halfS * 1.2, -halfS, size * 1.2, size);
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 1;
+      // Offscreen canvas for clean sprite tinting (no box artifact)
+      if (!G._tintCanvas) {
+        G._tintCanvas = document.createElement('canvas');
+        G._tintCtx = G._tintCanvas.getContext('2d');
+      }
+      const tc = G._tintCanvas;
+      const tctx = G._tintCtx;
+      tc.width = sprW;
+      tc.height = sprH;
+      tctx.clearRect(0, 0, sprW, sprH);
+      // Draw sprite onto offscreen canvas
+      tctx.drawImage(bertSprite, 0, 0, sprW, sprH);
+      // Tint only the opaque pixels using source-atop
+      tctx.globalCompositeOperation = 'source-atop';
+      tctx.globalAlpha = 0.5;
+      tctx.fillStyle = skin.color;
+      tctx.fillRect(0, 0, sprW, sprH);
+      tctx.globalAlpha = 1;
+      tctx.globalCompositeOperation = 'source-over';
+      // Draw the tinted result onto main canvas
+      ctx.drawImage(tc, -halfS * 1.2, -halfS, sprW, sprH);
     } else {
-      ctx.drawImage(bertSprite, -halfS * 1.2, -halfS, size * 1.2, size);
+      ctx.drawImage(bertSprite, -halfS * 1.2, -halfS, sprW, sprH);
     }
     
-    // Animated tail
     drawTail(ctx, halfS, size, skin.color, b.tailAngle);
   } else {
-    // Fallback pixel Bert
     drawPixelBert(ctx, halfS, size, skin.color, b.tailAngle);
   }
   
-  // Skin effects
+  // Skin glow effects (no strokeRect box — use arc instead)
   if (G.equippedSkin === 'neon') {
     ctx.shadowColor = '#00e5ff';
-    ctx.shadowBlur = 10;
-    ctx.strokeStyle = 'rgba(0,229,255,0.3)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(-halfS, -halfS, size, size);
+    ctx.shadowBlur = 12;
+    ctx.strokeStyle = 'rgba(0,229,255,0.25)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, halfS * 0.9, halfS * 0.7, 0, 0, Math.PI * 2);
+    ctx.stroke();
     ctx.shadowBlur = 0;
   } else if (G.equippedSkin === 'fire') {
-    // Fire particles
     if (G.frameCount % 3 === 0) {
       G.particles.push({
         x: b.x - halfS * 0.5 + Math.random() * size * 0.5,
         y: b.y + halfS * 0.3,
         vx: (Math.random() - 0.5) * 1,
         vy: -Math.random() * 2 - 1,
-        life: 10 + Math.random() * 5,
-        maxLife: 15,
+        life: 10 + Math.random() * 5, maxLife: 15,
         color: Math.random() < 0.5 ? '#ff3860' : '#ff8800',
         size: Math.random() * 3 + 1,
       });
@@ -1860,11 +1927,8 @@ function drawBert(ctx) {
     if (G.frameCount % 5 === 0) {
       G.particles.push({
         x: b.x + (Math.random() - 0.5) * size,
-        y: b.y - halfS,
-        vx: 0, vy: 2,
-        life: 15, maxLife: 15,
-        color: '#44d62c',
-        size: 2,
+        y: b.y - halfS, vx: 0, vy: 2,
+        life: 15, maxLife: 15, color: '#44d62c', size: 2,
       });
     }
   } else if (G.equippedSkin === 'cosmic') {
@@ -1873,13 +1937,22 @@ function drawBert(ctx) {
       G.particles.push({
         x: b.x + Math.cos(angle) * halfS * 0.8,
         y: b.y + Math.sin(angle) * halfS * 0.8,
-        vx: Math.cos(angle) * 0.5,
-        vy: Math.sin(angle) * 0.5,
+        vx: Math.cos(angle) * 0.5, vy: Math.sin(angle) * 0.5,
         life: 12, maxLife: 12,
-        color: `hsl(${Math.random()*360}, 80%, 70%)`,
-        size: 1.5,
+        color: `hsl(${Math.random()*360}, 80%, 70%)`, size: 1.5,
       });
     }
+  }
+  
+  // Ghost mode visual
+  if (G.ghostActive) {
+    ctx.globalAlpha = 0.15 + Math.sin(G.frameCount * 0.15) * 0.1;
+    ctx.strokeStyle = '#88aaff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, halfS * 1.1, halfS * 0.85, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
   }
   
   ctx.restore();
