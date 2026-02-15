@@ -953,6 +953,7 @@ function startGame() {
   G.pipeTimer = -50;
   G.scrollDistance = 0;
   G.scoreMultiplier = 1;
+  G._scoreAccum = 0;
   G.flapHeld = false;
   G.flapHoldFrames = 0;
   G.combo = 0;
@@ -1193,8 +1194,7 @@ function gameOver() {
 function showGameOverScreen() {
   G.state = 'gameover';
   
-  // Calculate coins earned with multiplier
-  G.coinsEarned = Math.floor(G.score * G.scoreMultiplier);
+  // Add level bonus to coins earned (score+coins already accumulated during play)
   G.coinsEarned += (G.level - 1) * 5;
   if (G.bestCombo >= 5) G.coinsEarned += G.bestCombo;
   G.coins += G.coinsEarned;
@@ -1400,8 +1400,11 @@ function update() {
     // Score
     if (!p.scored && p.x + G.pipeWidth < G.bert.x) {
       p.scored = true;
-      G.score++;
-      G.coinsEarned++;
+      G._scoreAccum = (G._scoreAccum || 0) + G.scoreMultiplier;
+      const scoreGain = Math.floor(G._scoreAccum);
+      G._scoreAccum -= scoreGain;
+      G.score += scoreGain;
+      G.coinsEarned += scoreGain;
       G.combo++;
       if (G.combo > G.bestCombo) G.bestCombo = G.combo;
       AudioSystem.playCoin();
