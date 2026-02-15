@@ -2440,36 +2440,84 @@ function shareScoreCard() {
   x.fillStyle = '#4a4e6a';
   x.fillText('play at flappy-bert.onrender.com', w/2, 770);
   
-  // Convert to shareable
-  c.toBlob(blob => {
-    if (!blob) return;
-    
-    // Try native share (mobile)
-    if (navigator.share && navigator.canShare) {
-      const file = new File([blob], 'flappy-bert-score.png', { type: 'image/png' });
-      if (navigator.canShare({ files: [file] })) {
-        navigator.share({
-          title: 'Flappy Bert - Score ' + G.score,
-          text: 'I scored ' + G.score + ' in Flappy Bert! Can you beat me? \u{1F426}\u{1F525}',
-          files: [file],
-        }).catch(() => downloadScoreCard(blob));
+  // Store canvas ref for fallback methods
+  G._shareCanvas = c;
+  
+  // Convert to shareable — try toBlob first, fall back to dataURL
+  try {
+    c.toBlob(blob => {
+      if (!blob) {
+        // toBlob returned null — use dataURL fallback
+        showScoreCardInline(c.toDataURL('image/png'));
         return;
       }
-    }
-    
-    // Fallback: download
-    downloadScoreCard(blob);
-  }, 'image/png');
+      
+      // Try native share (mobile)
+      try {
+        if (navigator.share && navigator.canShare) {
+          const file = new File([blob], 'flappy-bert-score.png', { type: 'image/png' });
+          if (navigator.canShare({ files: [file] })) {
+            navigator.share({
+              title: 'Flappy Bert - Score ' + G.score,
+              text: 'I scored ' + G.score + ' in Flappy Bert! Can you beat me? \u{1F426}\u{1F525}',
+              files: [file],
+            }).catch(() => downloadScoreCard(blob));
+            return;
+          }
+        }
+      } catch(e) {}
+      
+      // Fallback: download
+      downloadScoreCard(blob);
+    }, 'image/png');
+  } catch(e) {
+    // toBlob not supported — use dataURL
+    showScoreCardInline(c.toDataURL('image/png'));
+  }
 }
 
 function downloadScoreCard(blob) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'flappy-bert-' + G.score + '.png';
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 3000);
-  showToast('\u{1F4F7} Score card saved!', 'success');
+  try {
+    // Method 1: Anchor download (works in most browsers)
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'flappy-bert-' + G.score + '.png';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showToast('\u{1F4F7} Score card saved!', 'success');
+  } catch(e1) {
+    try {
+      // Method 2: Open as data URL in new tab (Telegram/iframe fallback)
+      const dataUrl = G._shareCanvas.toDataURL('image/png');
+      const win = window.open();
+      if (win) {
+        win.document.write('<img src="' + dataUrl + '" style="max-width:100%"><p>Long-press image to save</p>');
+        showToast('\u{1F4F7} Opened in new tab!', 'success');
+      } else {
+        // Method 3: Show inline if popups blocked
+        showScoreCardInline(dataUrl);
+      }
+    } catch(e2) {
+      showToast('Could not save image', 'warning');
+    }
+  }
+}
+
+function showScoreCardInline(dataUrl) {
+  // Show the image in a modal overlay so user can long-press to save
+  const div = document.createElement('div');
+  div.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px';
+  div.innerHTML = `
+    <img src="${dataUrl}" style="max-width:90%;max-height:70vh;border-radius:8px;border:2px solid #ff6b35">
+    <p style="color:#7a7e9a;font-family:var(--font);font-size:8px;margin-top:12px">LONG-PRESS IMAGE TO SAVE</p>
+    <button onclick="this.parentElement.remove()" style="margin-top:12px;font-family:var(--font);font-size:10px;padding:10px 24px;background:var(--accent);color:#fff;border:2px solid #ff8a5c;border-radius:4px;cursor:pointer">CLOSE</button>
+  `;
+  document.body.appendChild(div);
+  showToast('\u{1F4F7} Long-press to save!', 'info');
 }
 
 function renderLeaderboard() {
