@@ -363,10 +363,9 @@ app.get('/api/player/:id/card', (req, res) => {
 // Health check
 app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
 
-// Serve the game HTML from the same server
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve the game HTML from the same directory
 app.get('/game', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'flappy_bert.html'));
+  res.sendFile(path.join(__dirname, 'flappy_bert.html'));
 });
 
 // ── Start server ────────────────────────────────────────────────────
