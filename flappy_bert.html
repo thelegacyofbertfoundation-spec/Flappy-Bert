@@ -479,6 +479,10 @@ html, body {
   <button class="btn btn-secondary" onclick="showChallenges()" style="border-color:var(--accent2);color:var(--accent2)">&#x1F3AF; CHALLENGES</button>
   <button class="btn btn-gold" onclick="showLeaderboard()">&#x1F3C6; RANKINGS</button>
   <div id="menuStreak" style="font-size:clamp(6px,1.4vw,8px);color:var(--accent2);margin-top:10px;display:none">&#x1F525; STREAK: <span id="menuStreakCount">0</span> DAYS</div>
+  <div style="margin-top:24px;opacity:0.35;text-align:center">
+    <div style="font-size:clamp(5px,1.2vw,7px);color:#7a7e9a;letter-spacing:2px">BUILT BY</div>
+    <div style="font-size:clamp(7px,1.6vw,9px);color:#00e5ff;letter-spacing:3px;margin-top:3px">DR. INKER LABS</div>
+  </div>
 </div>
 
 <!-- Game Over -->
@@ -2305,7 +2309,7 @@ function renderChallenges() {
 }
 
 // ========== SHARE SCORE CARD ==========
-function shareScoreCard() {
+async function shareScoreCard() {
   const w = 600, h = 800;
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
@@ -2436,74 +2440,47 @@ function shareScoreCard() {
   x.fillText(G.playerName, w/2, 720);
   
   // Footer / branding
-  x.font = '10px "Press Start 2P", monospace';
-  x.fillStyle = '#4a4e6a';
-  x.fillText('play at flappy-bert.onrender.com', w/2, 770);
+  x.font = '8px "Press Start 2P", monospace';
+  x.fillStyle = '#3a3e5a';
+  x.fillText('BUILT BY', w/2, 740);
+  x.font = '12px "Press Start 2P", monospace';
+  x.fillStyle = '#00e5ff';
+  x.globalAlpha = 0.5;
+  x.fillText('DR. INKER LABS', w/2, 758);
+  x.globalAlpha = 1;
+  x.font = '8px "Press Start 2P", monospace';
+  x.fillStyle = '#3a3e5a';
+  x.fillText('flappy-bert.onrender.com', w/2, 780);
   
-  // Store canvas ref for fallback methods
-  G._shareCanvas = c;
-  
-  // Convert to shareable — try toBlob first, fall back to dataURL
-  try {
-    c.toBlob(blob => {
-      if (!blob) {
-        // toBlob returned null — use dataURL fallback
-        showScoreCardInline(c.toDataURL('image/png'));
-        return;
-      }
-      
-      // Try native share (mobile)
-      try {
-        if (navigator.share && navigator.canShare) {
-          const file = new File([blob], 'flappy-bert-score.png', { type: 'image/png' });
-          if (navigator.canShare({ files: [file] })) {
-            navigator.share({
-              title: 'Flappy Bert - Score ' + G.score,
-              text: 'I scored ' + G.score + ' in Flappy Bert! Can you beat me? \u{1F426}\u{1F525}',
-              files: [file],
-            }).catch(() => downloadScoreCard(blob));
-            return;
-          }
-        }
-      } catch(e) {}
-      
-      // Fallback: download
-      downloadScoreCard(blob);
-    }, 'image/png');
-  } catch(e) {
-    // toBlob not supported — use dataURL
+  // Send to Telegram bot chat via server
+  const user = getTelegramUser();
+  if (!user) {
+    // Not in Telegram — fall back to inline display
     showScoreCardInline(c.toDataURL('image/png'));
+    return;
   }
-}
-
-function downloadScoreCard(blob) {
+  
+  showToast('\u{1F4E4} Sending to chat...', 'info');
+  
   try {
-    // Method 1: Anchor download (works in most browsers)
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'flappy-bert-' + G.score + '.png';
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-    showToast('\u{1F4F7} Score card saved!', 'success');
-  } catch(e1) {
-    try {
-      // Method 2: Open as data URL in new tab (Telegram/iframe fallback)
-      const dataUrl = G._shareCanvas.toDataURL('image/png');
-      const win = window.open();
-      if (win) {
-        win.document.write('<img src="' + dataUrl + '" style="max-width:100%"><p>Long-press image to save</p>');
-        showToast('\u{1F4F7} Opened in new tab!', 'success');
-      } else {
-        // Method 3: Show inline if popups blocked
-        showScoreCardInline(dataUrl);
-      }
-    } catch(e2) {
-      showToast('Could not save image', 'warning');
+    const dataUrl = c.toDataURL('image/png');
+    const res = await fetch((API_BASE || '') + '/api/share', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        telegram_id: user.id,
+        image_base64: dataUrl,
+        score: G.score,
+      }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast('\u{2705} Score card sent to chat!', 'success');
+    } else {
+      showScoreCardInline(dataUrl);
     }
+  } catch(e) {
+    showScoreCardInline(c.toDataURL('image/png'));
   }
 }
 

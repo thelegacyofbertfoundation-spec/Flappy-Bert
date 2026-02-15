@@ -46,7 +46,7 @@ db.init();
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 
 console.log('🐱  Flappy Bert Bot starting…');
 
@@ -357,6 +357,37 @@ app.get('/api/player/:id/card', (req, res) => {
   } catch (err) {
     console.error('API player card error:', err);
     res.status(500).json({ error: 'Failed to render card' });
+  }
+});
+
+// POST /api/share — Send score card image to user's Telegram chat
+// Body: { telegram_id, image_base64, score, caption? }
+app.post('/api/share', async (req, res) => {
+  try {
+    const { telegram_id, image_base64, score, caption } = req.body;
+    
+    if (!telegram_id || !image_base64) {
+      return res.status(400).json({ error: 'telegram_id and image_base64 required' });
+    }
+    
+    // Strip data URL prefix if present
+    const base64Data = image_base64.replace(/^data:image\/\w+;base64,/, '');
+    const imageBuffer = Buffer.from(base64Data, 'base64');
+    
+    const defaultCaption = `🐱 Flappy Bert Score: ${score || '?'}\n\n🎮 Can you beat me?\n🔗 Play now: ${WEBAPP_URL}`;
+    
+    await bot.sendPhoto(telegram_id, imageBuffer, {
+      caption: caption || defaultCaption,
+      parse_mode: 'HTML',
+    }, {
+      filename: 'flappy-bert-score.png',
+      contentType: 'image/png',
+    });
+    
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('API share error:', err.message);
+    res.status(500).json({ error: 'Failed to send image' });
   }
 });
 
