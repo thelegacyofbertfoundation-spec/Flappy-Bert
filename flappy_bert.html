@@ -1208,31 +1208,6 @@ function updateLeaderboard(name, score) {
     G.leaderboard.push({ name, score });
   }
   
-  // Add some bot entries for demo
-  if (G.leaderboard.length < 5) {
-    const bots = [
-      { name: 'FlappyKing', score: 42 + Math.floor(Math.random()*20) },
-      { name: 'BertMaster', score: 35 + Math.floor(Math.random()*15) },
-      { name: 'PipeDodger', score: 28 + Math.floor(Math.random()*15) },
-      { name: 'SkyCat99', score: 22 + Math.floor(Math.random()*12) },
-      { name: 'TapWizard', score: 18 + Math.floor(Math.random()*10) },
-      { name: 'NeonFlyer', score: 15 + Math.floor(Math.random()*10) },
-      { name: 'CloudSurf', score: 12 + Math.floor(Math.random()*8) },
-      { name: 'PixelPilot', score: 10 + Math.floor(Math.random()*8) },
-      { name: 'GapJumper', score: 8 + Math.floor(Math.random()*6) },
-      { name: 'WingNut42', score: 5 + Math.floor(Math.random()*5) },
-      { name: 'RetroRacer', score: 4 + Math.floor(Math.random()*4) },
-      { name: 'TurboTap', score: 3 + Math.floor(Math.random()*3) },
-      { name: 'BertFan', score: 2 + Math.floor(Math.random()*3) },
-      { name: 'NewbieOne', score: 1 + Math.floor(Math.random()*2) },
-    ];
-    for (const bot of bots) {
-      if (!G.leaderboard.find(e => e.name === bot.name)) {
-        G.leaderboard.push(bot);
-      }
-    }
-  }
-  
   // Sort and keep top 20
   G.leaderboard.sort((a, b) => b.score - a.score);
   G.leaderboard = G.leaderboard.slice(0, 20);
@@ -2044,11 +2019,13 @@ function showShop() {
 async function showLeaderboard() {
   hideAllOverlays();
   G.state = 'leaderboard';
+  
   // Try server leaderboard first
   const serverLb = await fetchServerLeaderboard();
   if (serverLb && serverLb.length > 0) {
     G.leaderboard = serverLb;
   } else if (G.leaderboard.length === 0) {
+    // Fallback to local only if server returned nothing
     updateLeaderboard(G.playerName, G.bestScore);
   }
   renderLeaderboard();
@@ -2153,6 +2130,7 @@ function equipPower(id) {
 
 function renderLeaderboard() {
   const resetTime = getTimeUntilReset();
+  const currentUser = getTelegramUser();
   let html = '<div class="lb-title">\u{1F3C6} WEEKLY RANKINGS</div>';
   html += `<div class="lb-reset-info">Resets in ${resetTime}</div>`;
   
@@ -2162,7 +2140,9 @@ function renderLeaderboard() {
     for (let i = 0; i < G.leaderboard.length; i++) {
       const entry = G.leaderboard[i];
       const rank = i + 1;
-      const isYou = entry.name === G.playerName;
+      // Match by telegram_id if available, fallback to name
+      const isYou = (currentUser && entry.telegram_id && String(entry.telegram_id) === String(currentUser.id))
+                     || entry.name === G.playerName;
       let rowClass = '';
       if (rank === 1) rowClass = 'top1';
       else if (rank === 2) rowClass = 'top2';
@@ -2215,11 +2195,10 @@ async function submitScoreToServer(score, level, coinsEarned) {
       }));
     }
   } catch(e) {}
-  if (!API_BASE) return;
   const user = getTelegramUser();
   if (!user) return;
   try {
-    await fetch(API_BASE + '/api/score', {
+    await fetch((API_BASE || '') + '/api/score', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2231,9 +2210,8 @@ async function submitScoreToServer(score, level, coinsEarned) {
 }
 
 async function fetchServerLeaderboard() {
-  if (!API_BASE) return null;
   try {
-    const res = await fetch(API_BASE + '/api/leaderboard?limit=20');
+    const res = await fetch((API_BASE || '') + '/api/leaderboard?limit=20');
     const data = await res.json();
     return data.entries.map(e => ({
       name: e.first_name || e.username || 'Unknown',
