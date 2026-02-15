@@ -487,12 +487,12 @@ const G = {
   gameSpeed: 2.5,
   pipeGap: 160,
   pipeWidth: 52,
-  gravity: 0.42,
-  flapForce: -7,
+  gravity: 0.32,
+  flapForce: -5.8,
   bertSize: 40,
   groundHeight: 60,
   // Difficulty
-  basePipeGap: 160,
+  basePipeGap: 190,
   baseSpeed: 2.5,
   // Power-ups
   activePower: null,
@@ -761,7 +761,7 @@ function updateDifficulty() {
   G.gameSpeed = G.baseSpeed + Math.min(lvl * 0.15, 3);
   
   // Gap decreases
-  G.pipeGap = Math.max(G.basePipeGap - lvl * 4, 90);
+  G.pipeGap = Math.max(G.basePipeGap - lvl * 4, 110);
   
   // Update UI
   document.getElementById('levelIndicator').textContent = 'LVL ' + lvl;
@@ -938,7 +938,7 @@ function update() {
   
   // Pipes
   G.pipeTimer++;
-  const pipeInterval = Math.max(90 - G.level * 3, 50);
+  const pipeInterval = Math.max(110 - G.level * 3, 65);
   if (G.pipeTimer >= pipeInterval) {
     addPipe();
     G.pipeTimer = 0;
