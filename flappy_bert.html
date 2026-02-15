@@ -412,6 +412,8 @@ html, body {
   <span id="coinCount">0</span>
 </div>
 
+<div id="muteBtn" onclick="toggleMute()" style="position:fixed;top:12px;left:12px;z-index:100;width:36px;height:36px;border-radius:50%;background:rgba(20,24,41,0.8);border:1px solid rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;user-select:none">&#x1F50A;</div>
+
 <div class="score-display" id="scoreDisplay">0</div>
 
 <div class="level-indicator" id="levelIndicator">LVL 1</div>
@@ -487,8 +489,8 @@ const G = {
   gameSpeed: 2.5,
   pipeGap: 160,
   pipeWidth: 52,
-  gravity: 0.32,
-  flapForce: -5.8,
+  gravity: 0.25,
+  flapForce: -4.8,
   bertSize: 40,
   groundHeight: 60,
   // Difficulty
@@ -567,6 +569,9 @@ function init() {
     }
   } catch(e) {}
   
+  // Init audio
+  AudioSystem.init();
+  
   requestAnimationFrame(gameLoop);
 }
 
@@ -593,6 +598,165 @@ function generateStars() {
     });
   }
 }
+
+// ========== AUDIO - CHIPTUNE MUSIC ==========
+const AudioSystem = {
+  ctx: null,
+  masterGain: null,
+  musicGain: null,
+  sfxGain: null,
+  musicPlaying: false,
+  musicNodes: [],
+  muted: false,
+  
+  init() {
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.value = 0.3;
+      this.masterGain.connect(this.ctx.destination);
+      
+      this.musicGain = this.ctx.createGain();
+      this.musicGain.gain.value = 0.25;
+      this.musicGain.connect(this.masterGain);
+      
+      this.sfxGain = this.ctx.createGain();
+      this.sfxGain.gain.value = 0.4;
+      this.sfxGain.connect(this.masterGain);
+    } catch(e) { console.log('Audio not available'); }
+  },
+  
+  resume() {
+    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+  },
+  
+  toggle() {
+    this.muted = !this.muted;
+    if (this.masterGain) this.masterGain.gain.value = this.muted ? 0 : 0.3;
+    return !this.muted;
+  },
+  
+  // Simple square wave note
+  playNote(freq, startTime, duration, gain = 0.15, type = 'square') {
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(gain, startTime);
+    g.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+    osc.connect(g);
+    g.connect(this.musicGain);
+    osc.start(startTime);
+    osc.stop(startTime + duration);
+    this.musicNodes.push(osc);
+    return osc;
+  },
+  
+  // Play flap sound effect
+  playFlap() {
+    if (!this.ctx) return;
+    this.resume();
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(400, now);
+    osc.frequency.exponentialRampToValueAtTime(600, now + 0.06);
+    osc.frequency.exponentialRampToValueAtTime(350, now + 0.1);
+    g.gain.setValueAtTime(0.15, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    osc.connect(g);
+    g.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + 0.12);
+  },
+  
+  // Play score/coin sound
+  playCoin() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(880, now);
+    osc.frequency.setValueAtTime(1108, now + 0.06);
+    g.gain.setValueAtTime(0.1, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    osc.connect(g);
+    g.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + 0.15);
+  },
+  
+  // Play death sound
+  playDeath() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    for (let i = 0; i < 4; i++) {
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(300 - i * 50, now + i * 0.08);
+      g.gain.setValueAtTime(0.12, now + i * 0.08);
+      g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.1);
+      osc.connect(g);
+      g.connect(this.sfxGain);
+      osc.start(now + i * 0.08);
+      osc.stop(now + i * 0.08 + 0.12);
+    }
+  },
+  
+  // Looping background melody
+  startMusic() {
+    if (!this.ctx || this.musicPlaying) return;
+    this.musicPlaying = true;
+    this.scheduleLoop();
+  },
+  
+  stopMusic() {
+    this.musicPlaying = false;
+    this.musicNodes.forEach(n => { try { n.stop(); } catch(e){} });
+    this.musicNodes = [];
+  },
+  
+  scheduleLoop() {
+    if (!this.musicPlaying || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const bpm = 128;
+    const step = 60 / bpm / 2; // 16th notes
+    
+    // Catchy chiptune melody — 16 bars then repeat
+    const melody = [
+      392, 0, 523, 0, 659, 0, 523, 0, 392, 0, 440, 0, 523, 0, 392, 0,  // G C E C G A C G
+      349, 0, 440, 0, 523, 0, 440, 0, 349, 0, 392, 0, 440, 0, 349, 0,  // F A C A F G A F  
+      330, 0, 392, 0, 523, 0, 659, 0, 784, 0, 659, 0, 523, 0, 392, 0,  // E G C E G5 E C G
+      349, 0, 392, 0, 440, 0, 523, 0, 392, 392, 0, 0, 0, 0, 0, 0,       // F G A C G G ...
+    ];
+    
+    // Bass line
+    const bass = [
+      196, 196, 0, 196, 196, 196, 0, 196, 262, 262, 0, 262, 196, 196, 0, 196,
+      175, 175, 0, 175, 175, 175, 0, 175, 220, 220, 0, 220, 175, 175, 0, 175,
+      165, 165, 0, 165, 262, 262, 0, 262, 330, 330, 0, 330, 262, 262, 0, 262,
+      175, 175, 0, 175, 196, 196, 0, 196, 196, 196, 0, 0, 0, 0, 0, 0,
+    ];
+
+    for (let i = 0; i < melody.length; i++) {
+      const t = now + i * step;
+      if (melody[i] > 0) {
+        this.playNote(melody[i], t, step * 0.8, 0.08, 'square');
+      }
+      if (bass[i] > 0) {
+        this.playNote(bass[i], t, step * 0.7, 0.06, 'triangle');
+      }
+    }
+    
+    // Schedule next loop
+    const loopDuration = melody.length * step;
+    setTimeout(() => this.scheduleLoop(), (loopDuration - 0.1) * 1000);
+  }
+};
 
 // ========== DATA PERSISTENCE ==========
 function loadData() {
@@ -665,11 +829,11 @@ function startGame() {
   G.coinsEarned = 0;
   G.level = 1;
   G.frameCount = 0;
-  G.pipeTimer = 0;
   G.pipes = [];
   G.particles = [];
   G.gameSpeed = G.baseSpeed;
   G.pipeGap = G.basePipeGap;
+  G.pipeTimer = -50; // Extra grace period before first pipe
   G.activePower = null;
   G.powerTimer = 0;
   G.shieldActive = false;
@@ -701,12 +865,17 @@ function startGame() {
   document.getElementById('scoreDisplay').textContent = '0';
   document.getElementById('levelIndicator').style.display = 'block';
   document.getElementById('levelIndicator').textContent = 'LVL 1';
+  
+  AudioSystem.resume();
+  AudioSystem.startMusic();
 }
 
 function onTap() {
+  AudioSystem.resume();
   if (G.state === 'playing') {
     G.bert.vy = G.flapForce;
     G.bert.tailDir *= -1; // Flap the tail
+    AudioSystem.playFlap();
     // Spawn flap particles
     for (let i = 0; i < 5; i++) {
       G.particles.push({
@@ -726,6 +895,11 @@ function onTap() {
 function getSkinColor() {
   const skin = SKINS.find(s => s.id === G.equippedSkin);
   return skin ? skin.color : '#ff6b35';
+}
+
+function toggleMute() {
+  const on = AudioSystem.toggle();
+  document.getElementById('muteBtn').innerHTML = on ? '&#x1F50A;' : '&#x1F507;';
 }
 
 function activatePower(powerId) {
@@ -815,6 +989,8 @@ function checkCollision() {
 
 function gameOver() {
   G.state = 'gameover';
+  AudioSystem.stopMusic();
+  AudioSystem.playDeath();
   
   // Calculate coins earned
   G.coinsEarned = Math.floor(G.score * G.scoreMultiplier);
@@ -924,6 +1100,7 @@ function update() {
   
   // Bert physics
   G.bert.vy += G.gravity;
+  if (G.bert.vy > 6) G.bert.vy = 6; // Terminal velocity cap
   G.bert.y += G.bert.vy;
   G.bert.rotation = Math.min(Math.max(G.bert.vy * 3, -30), 70);
   
@@ -961,6 +1138,7 @@ function update() {
       p.scored = true;
       G.score++;
       G.coinsEarned++;
+      AudioSystem.playCoin();
       updateDifficulty();
       document.getElementById('scoreDisplay').textContent = G.score;
       
@@ -1067,12 +1245,45 @@ function render() {
   
   // Sky gradient
   const skyGrad = ctx.createLinearGradient(0, 0, 0, h);
-  skyGrad.addColorStop(0, '#0a0e1a');
-  skyGrad.addColorStop(0.4, '#121830');
-  skyGrad.addColorStop(0.7, '#1a2248');
-  skyGrad.addColorStop(1, '#0d1020');
+  skyGrad.addColorStop(0, '#050818');
+  skyGrad.addColorStop(0.15, '#0a1028');
+  skyGrad.addColorStop(0.4, '#101838');
+  skyGrad.addColorStop(0.65, '#1a2450');
+  skyGrad.addColorStop(0.85, '#243068');
+  skyGrad.addColorStop(1, '#1a2040');
   ctx.fillStyle = skyGrad;
   ctx.fillRect(0, 0, w, h);
+  
+  // Moon
+  const moonX = w * 0.8;
+  const moonY = h * 0.12;
+  const moonR = Math.min(28, w * 0.06);
+  ctx.save();
+  ctx.shadowColor = 'rgba(200,220,255,0.4)';
+  ctx.shadowBlur = 30;
+  const moonGrad = ctx.createRadialGradient(moonX - 3, moonY - 3, 0, moonX, moonY, moonR);
+  moonGrad.addColorStop(0, 'rgba(240,245,255,0.95)');
+  moonGrad.addColorStop(0.5, 'rgba(200,215,240,0.85)');
+  moonGrad.addColorStop(1, 'rgba(150,175,220,0.6)');
+  ctx.fillStyle = moonGrad;
+  ctx.beginPath();
+  ctx.arc(moonX, moonY, moonR, 0, Math.PI * 2);
+  ctx.fill();
+  // Moon craters
+  ctx.fillStyle = 'rgba(130,150,190,0.2)';
+  ctx.beginPath(); ctx.arc(moonX - 6, moonY + 4, 5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(moonX + 8, moonY - 3, 3.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(moonX + 2, moonY + 8, 2.5, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  
+  // Clouds (slow drifting)
+  const cloudOffset = G.state === 'playing' ? G.frameCount * 0.15 : G.frameCount * 0.05;
+  ctx.fillStyle = 'rgba(150,170,220,0.04)';
+  for (let i = 0; i < 5; i++) {
+    const cx = ((i * 200 + 80) - cloudOffset * (0.3 + i * 0.1)) % (w + 200) - 60;
+    const cy = 40 + i * 35 + Math.sin(i * 2.5) * 20;
+    drawCloud(ctx, cx, cy, 40 + i * 10);
+  }
   
   // Stars
   for (const s of G.stars) {
@@ -1143,32 +1354,94 @@ function render() {
   }
 }
 
+function drawCloud(ctx, x, y, size) {
+  ctx.beginPath();
+  ctx.arc(x, y, size * 0.5, 0, Math.PI * 2);
+  ctx.arc(x + size * 0.35, y - size * 0.15, size * 0.4, 0, Math.PI * 2);
+  ctx.arc(x + size * 0.7, y, size * 0.45, 0, Math.PI * 2);
+  ctx.arc(x + size * 0.35, y + size * 0.1, size * 0.35, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawBackground(ctx, w, h) {
   const gndY = h - G.groundHeight;
-  // Far mountains
-  ctx.fillStyle = 'rgba(20,25,50,0.8)';
-  for (let x = 0; x < w + 100; x += 120) {
-    const mh = 60 + Math.sin(x * 0.01) * 30 + Math.sin(x * 0.03) * 15;
-    ctx.beginPath();
-    ctx.moveTo(x - 60, gndY);
+  const playScroll = G.state === 'playing' ? G.ground.offset : 0;
+  
+  // Far mountain range (very slow parallax)
+  const mtScroll1 = playScroll * 0.05;
+  ctx.fillStyle = 'rgba(12,16,40,0.7)';
+  ctx.beginPath();
+  ctx.moveTo(0, gndY);
+  for (let x = 0; x <= w + 40; x += 4) {
+    const rx = x + mtScroll1;
+    const mh = 80 + Math.sin(rx * 0.006) * 40 + Math.sin(rx * 0.015) * 25 + Math.sin(rx * 0.003) * 15;
     ctx.lineTo(x, gndY - mh);
-    ctx.lineTo(x + 60, gndY);
-    ctx.fill();
   }
-  // Near buildings
-  ctx.fillStyle = 'rgba(15,18,35,0.9)';
-  const scrollX = (G.state === 'playing' ? G.ground.offset * 0.3 : 0);
-  for (let x = -scrollX % 80; x < w + 80; x += 80) {
-    const bh = 30 + Math.sin(x * 0.05 + 1) * 25;
-    ctx.fillRect(x, gndY - bh, 50, bh);
-    // Windows
-    ctx.fillStyle = 'rgba(255,200,100,0.15)';
-    for (let wy = gndY - bh + 8; wy < gndY - 4; wy += 12) {
-      for (let wx = x + 6; wx < x + 44; wx += 14) {
-        ctx.fillRect(wx, wy, 6, 6);
+  ctx.lineTo(w, gndY);
+  ctx.fill();
+  
+  // Mid mountain range
+  const mtScroll2 = playScroll * 0.1;
+  ctx.fillStyle = 'rgba(16,20,45,0.8)';
+  ctx.beginPath();
+  ctx.moveTo(0, gndY);
+  for (let x = 0; x <= w + 40; x += 4) {
+    const rx = x + mtScroll2;
+    const mh = 55 + Math.sin(rx * 0.01 + 2) * 30 + Math.sin(rx * 0.025) * 18;
+    ctx.lineTo(x, gndY - mh);
+  }
+  ctx.lineTo(w, gndY);
+  ctx.fill();
+  
+  // Far buildings (slow scroll)
+  const bldScroll1 = playScroll * 0.15;
+  ctx.fillStyle = 'rgba(14,17,38,0.85)';
+  for (let x = -(bldScroll1 % 100); x < w + 100; x += 100) {
+    const seed = Math.sin(x * 0.077 + 5) * 10000;
+    const bw = 35 + (seed % 25);
+    const bh = 50 + Math.abs(Math.sin(x * 0.03 + 1)) * 60;
+    ctx.fillRect(x, gndY - bh, bw, bh);
+    // Roof detail
+    if (bh > 80) {
+      ctx.fillRect(x + bw * 0.3, gndY - bh - 8, 4, 8);
+      ctx.fillRect(x + bw * 0.6, gndY - bh - 12, 3, 12);
+    }
+  }
+  // Far building windows
+  ctx.fillStyle = 'rgba(255,200,80,0.06)';
+  for (let x = -(bldScroll1 % 100); x < w + 100; x += 100) {
+    const bw = 35 + ((Math.sin(x * 0.077 + 5) * 10000) % 25);
+    const bh = 50 + Math.abs(Math.sin(x * 0.03 + 1)) * 60;
+    for (let wy = gndY - bh + 10; wy < gndY - 5; wy += 14) {
+      for (let wx = x + 5; wx < x + bw - 5; wx += 10) {
+        if (Math.sin(wx * 3.7 + wy * 2.3) > 0) {
+          ctx.fillRect(wx, wy, 4, 5);
+        }
       }
     }
-    ctx.fillStyle = 'rgba(15,18,35,0.9)';
+  }
+  
+  // Near buildings (faster scroll, more detail)
+  const bldScroll2 = playScroll * 0.3;
+  ctx.fillStyle = 'rgba(10,13,30,0.92)';
+  for (let x = -(bldScroll2 % 75); x < w + 75; x += 75) {
+    const seed = Math.sin(x * 0.093 + 3) * 10000;
+    const bw = 40 + (seed % 20);
+    const bh = 30 + Math.abs(Math.sin(x * 0.047 + 2)) * 40;
+    ctx.fillRect(x, gndY - bh, bw, bh);
+  }
+  // Near building windows (brighter, warmer)
+  ctx.fillStyle = 'rgba(255,190,80,0.1)';
+  for (let x = -(bldScroll2 % 75); x < w + 75; x += 75) {
+    const bw = 40 + ((Math.sin(x * 0.093 + 3) * 10000) % 20);
+    const bh = 30 + Math.abs(Math.sin(x * 0.047 + 2)) * 40;
+    for (let wy = gndY - bh + 8; wy < gndY - 4; wy += 11) {
+      for (let wx = x + 5; wx < x + bw - 5; wx += 12) {
+        if (Math.sin(wx * 5.1 + wy * 1.7) > -0.2) {
+          ctx.fillRect(wx, wy, 5, 5);
+        }
+      }
+    }
   }
 }
 
@@ -1378,27 +1651,39 @@ function drawPixelBert(ctx, halfS, size, color, tailAngle) {
 function drawGround(ctx, w, h) {
   const gndY = h - G.groundHeight;
   
-  // Ground gradient
+  // Ground gradient - richer earth tones
   const gndGrad = ctx.createLinearGradient(0, gndY, 0, h);
-  gndGrad.addColorStop(0, '#2a1a0a');
-  gndGrad.addColorStop(0.1, '#3a2a1a');
+  gndGrad.addColorStop(0, '#3a5a2a');
+  gndGrad.addColorStop(0.05, '#2e4820');
+  gndGrad.addColorStop(0.15, '#3a2a1a');
+  gndGrad.addColorStop(0.5, '#2a1a0a');
   gndGrad.addColorStop(1, '#1a0a00');
   ctx.fillStyle = gndGrad;
   ctx.fillRect(0, gndY, w, G.groundHeight);
   
-  // Ground pattern
-  ctx.fillStyle = 'rgba(255,255,255,0.04)';
+  // Scrolling dirt texture
+  ctx.fillStyle = 'rgba(255,255,255,0.03)';
   const offset = G.ground.offset;
   for (let x = -offset; x < w + 32; x += 32) {
-    ctx.fillRect(x, gndY, 16, 4);
-    ctx.fillRect(x + 16, gndY + 8, 16, 4);
+    ctx.fillRect(x, gndY + 8, 16, 3);
+    ctx.fillRect(x + 16, gndY + 16, 16, 3);
+    ctx.fillRect(x + 8, gndY + 24, 12, 2);
   }
   
-  // Top line
-  ctx.fillStyle = '#4a3a2a';
-  ctx.fillRect(0, gndY, w, 3);
-  ctx.fillStyle = '#5a4a3a';
-  ctx.fillRect(0, gndY, w, 1);
+  // Grass tufts along top
+  ctx.fillStyle = '#4a7a30';
+  for (let x = -offset % 12; x < w + 12; x += 12) {
+    const gh = 3 + Math.sin(x * 0.3) * 2;
+    ctx.fillRect(x, gndY - 1, 3, gh + 1);
+    ctx.fillRect(x + 5, gndY - 1, 2, gh);
+    ctx.fillRect(x + 8, gndY - 1, 3, gh + 0.5);
+  }
+  
+  // Green top edge
+  ctx.fillStyle = '#5a8a3a';
+  ctx.fillRect(0, gndY, w, 2);
+  ctx.fillStyle = '#4a7a2a';
+  ctx.fillRect(0, gndY + 2, w, 1);
 }
 
 // ========== UI FUNCTIONS ==========
