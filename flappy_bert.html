@@ -866,6 +866,12 @@ function loadData() {
     G.ownedSkins = d.ownedSkins || ['default'];
     G.equippedSkin = d.equippedSkin || 'default';
     G.ownedMultipliers = d.ownedMultipliers || {};
+    // Migrate from old array format to object format
+    if (Array.isArray(G.ownedMultipliers)) {
+      const old = G.ownedMultipliers;
+      G.ownedMultipliers = {};
+      old.forEach(id => { G.ownedMultipliers[id] = 3; });
+    }
     G.equippedMultiplier = d.equippedMultiplier || null;
     G.playerName = d.playerName || 'Player';
     G.leaderboard = d.leaderboard || [];
@@ -1212,9 +1218,9 @@ function showGameOverScreen() {
   if (isNewBest) G.bestScore = G.score;
   
   updateLeaderboard(G.playerName, G.score);
-  submitScoreToServer(G.score, G.level, G.coinsEarned);
-  saveData();
+  saveData();  // Save BEFORE server submit — sendData() can close the WebApp
   updateCoinDisplay();
+  submitScoreToServer(G.score, G.level, G.coinsEarned);
   
   document.getElementById('scoreDisplay').style.display = 'none';
   document.getElementById('levelIndicator').style.display = 'none';
@@ -2557,13 +2563,8 @@ function getTelegramUser() {
 }
 
 async function submitScoreToServer(score, level, coinsEarned) {
-  try {
-    if (window.Telegram && window.Telegram.WebApp) {
-      window.Telegram.WebApp.sendData(JSON.stringify({
-        action: 'game_over', score, level, coinsEarned,
-      }));
-    }
-  } catch(e) {}
+  // Note: Do NOT use Telegram.WebApp.sendData() — it closes the Mini App
+  // and prevents subsequent saves. Use HTTP API instead.
   const user = getTelegramUser();
   if (!user) return;
   try {
