@@ -192,15 +192,40 @@ bot.onText(/\/help/, (msg) => {
     '🎮 /play — Launch the game',
     '🏆 /leaderboard — Weekly top 20 card',
     '📊 /mystats — Your personal stats card',
+    '📁 /history — Past weekly leaderboard CSVs',
     '❓ /help — This message',
     '',
     '*How It Works:*',
     '• Tap to make Bert flap through pipes',
     '• Earn coins per pipe cleared + level bonuses',
     '• Difficulty increases every 10 pipes',
-    '• Buy skins & power-ups in the shop',
+    '• Buy skins & multipliers in the shop',
     '• Leaderboard resets every Monday 00:00 UTC',
   ].join('\n'), { parse_mode: 'Markdown' });
+});
+
+// ── /history — Send past leaderboard CSVs ────────────────────────────
+bot.onText(/\/history/, async (msg) => {
+  const archives = db.getArchiveList();
+  
+  if (archives.length === 0) {
+    bot.sendMessage(msg.chat.id, '📁 No archived leaderboards yet. Archives are saved each Monday at reset.');
+    return;
+  }
+  
+  // Send the most recent archive as a file
+  const latest = archives[0];
+  const filepath = db.getArchivePath(latest.week);
+  
+  if (filepath) {
+    const caption = `📁 *Archived Leaderboards*\n\nSending most recent: \`${latest.week}\`\n\n${archives.length} total archive(s):\n${archives.map(a => `• ${a.week}`).join('\n')}`;
+    
+    await bot.sendMessage(msg.chat.id, caption, { parse_mode: 'Markdown' });
+    await bot.sendDocument(msg.chat.id, filepath, {}, {
+      filename: latest.filename,
+      contentType: 'text/csv',
+    });
+  }
 });
 
 // ── Handle WebApp data (sent when game ends) ────────────────────────
@@ -391,6 +416,25 @@ app.post('/api/share', async (req, res) => {
   }
 });
 
+// GET /api/archives — List all archived weeks
+app.get('/api/archives', (req, res) => {
+  res.json({ archives: db.getArchiveList() });
+});
+
+// GET /api/archives/:week — Download a specific week's CSV
+app.get('/api/archives/:week', (req, res) => {
+  const filepath = db.getArchivePath(req.params.week);
+  if (!filepath) return res.status(404).json({ error: 'Archive not found' });
+  res.download(filepath);
+});
+
+// POST /api/archive-now — Manually trigger archive for current week
+app.post('/api/archive-now', authMiddleware, (req, res) => {
+  const result = db.archiveWeek();
+  if (!result) return res.json({ ok: false, message: 'No scores to archive' });
+  res.json({ ok: true, ...result });
+});
+
 // Health check
 app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
 
@@ -406,5 +450,29 @@ app.listen(PORT, () => {
   console.log(`📅  Current week: ${db.getWeekStart()}`);
   console.log(`⏱   Reset in: ${getResetCountdown()}`);
   console.log('');
-  console.log('Commands: /start /play /leaderboard /mystats /help');
+  console.log('Commands: /start /play /leaderboard /mystats /history /help');
 });
+
+// ── Auto-archive: check every 10 minutes, archive before Monday reset ──
+let lastArchivedWeek = null;
+
+function checkAutoArchive() {
+  const now = new Date();
+  const nextMonday = db.getNextMondayUTC();
+  const msUntilReset = nextMonday.getTime() - now.getTime();
+  const currentWeek = db.getWeekStart();
+  
+  // Archive if within 30 minutes of reset and not already archived this week
+  if (msUntilReset <= 30 * 60 * 1000 && msUntilReset > 0 && lastArchivedWeek !== currentWeek) {
+    const result = db.archiveWeek(currentWeek);
+    if (result) {
+      lastArchivedWeek = currentWeek;
+      console.log(`✅  Auto-archived week ${currentWeek}`);
+    }
+  }
+}
+
+// Check every 10 minutes
+setInterval(checkAutoArchive, 10 * 60 * 1000);
+// Also check on startup (in case server restarted close to reset)
+checkAutoArchive();

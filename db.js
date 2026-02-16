@@ -1,13 +1,20 @@
 // db.js — SQLite database for Flappy Bert leaderboard
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 
-const DB_PATH = path.join(__dirname, 'flappy_bert.db');
+// Use persistent disk if available (Render), otherwise local directory
+const DATA_DIR = fs.existsSync('/data') ? '/data' : __dirname;
+const DB_PATH = path.join(DATA_DIR, 'flappy_bert.db');
+const ARCHIVE_DIR = path.join(DATA_DIR, 'archives');
 let db;
 
 function init() {
   db = new Database(DB_PATH);
   db.pragma('journal_mode = WAL');
+
+  // Ensure archives directory exists
+  if (!fs.existsSync(ARCHIVE_DIR)) fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS players (
@@ -151,6 +158,68 @@ function getAllTimeStats(telegramId) {
   `).get(telegramId);
 }
 
+// ── Weekly CSV Archive ────────────────────────────────────────────────
+
+function archiveWeek(weekStart) {
+  const week = weekStart || getWeekStart();
+  const filename = `leaderboard-${week}.csv`;
+  const filepath = path.join(ARCHIVE_DIR, filename);
+
+  // Don't overwrite if already archived
+  if (fs.existsSync(filepath)) return { filepath, filename, alreadyExists: true };
+
+  const entries = db.prepare(`
+    SELECT
+      p.telegram_id,
+      p.first_name,
+      p.username,
+      p.skin,
+      MAX(s.score) AS best_score,
+      COUNT(s.id)  AS games_played,
+      MAX(s.level) AS max_level,
+      SUM(s.coins_earned) AS total_coins
+    FROM scores s
+    JOIN players p ON p.telegram_id = s.telegram_id
+    WHERE s.week_start = ?
+    GROUP BY s.telegram_id
+    ORDER BY best_score DESC
+  `).all(week);
+
+  if (entries.length === 0) return null;
+
+  // Build CSV
+  const header = 'rank,telegram_id,player_name,username,best_score,games_played,max_level,total_coins,skin';
+  const rows = entries.map((e, i) => {
+    const name = (e.first_name || '').replace(/,/g, '');
+    const uname = e.username || '';
+    return `${i + 1},${e.telegram_id},${name},${uname},${e.best_score},${e.games_played},${e.max_level},${e.total_coins || 0},${e.skin || 'default'}`;
+  });
+
+  const csv = [header, ...rows].join('\n');
+  fs.writeFileSync(filepath, csv, 'utf8');
+  console.log(`📄 Archived week ${week}: ${entries.length} players → ${filename}`);
+
+  return { filepath, filename, playerCount: entries.length };
+}
+
+function getArchiveList() {
+  if (!fs.existsSync(ARCHIVE_DIR)) return [];
+  return fs.readdirSync(ARCHIVE_DIR)
+    .filter(f => f.endsWith('.csv'))
+    .sort()
+    .reverse()
+    .map(f => {
+      const week = f.replace('leaderboard-', '').replace('.csv', '');
+      const stats = fs.statSync(path.join(ARCHIVE_DIR, f));
+      return { filename: f, week, size: stats.size, created: stats.mtime };
+    });
+}
+
+function getArchivePath(week) {
+  const filepath = path.join(ARCHIVE_DIR, `leaderboard-${week}.csv`);
+  return fs.existsSync(filepath) ? filepath : null;
+}
+
 module.exports = {
   init,
   getWeekStart,
@@ -163,4 +232,8 @@ module.exports = {
   getPlayerWeeklyBest,
   getPlayerRank,
   getAllTimeStats,
+  archiveWeek,
+  getArchiveList,
+  getArchivePath,
+  ARCHIVE_DIR,
 };

@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: flappy-bert-bot
+    runtime: docker
+    plan: starter
+    disk:
+      name: flappy-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: WEBAPP_URL
+        sync: false
+      - key: PORT
+        value: 3000
+      - key: API_SECRET
+        sync: false

@@ -40,7 +40,7 @@ const HEADER_H     = 130;
 const ROW_H        = 44;
 const ROW_GAP      = 4;
 const PAD          = 28;
-const FOOTER_H     = 60;
+const FOOTER_H     = 72;
 const CORNER_R     = 16;
 const MAX_ENTRIES   = 20;
 
@@ -80,12 +80,9 @@ function renderLeaderboardCard(entries, options = {}) {
   drawCornerAccents(ctx, WIDTH, height);
 
   // ── Header ────────────────────────────────────────────────────────
-  // Trophy icon area
+  // Trophy icon (drawn — node-canvas can't render emojis)
   const trophyY = 30;
-  ctx.fillStyle = C.accent;
-  ctx.font = '32px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('🏆', WIDTH / 2, trophyY + 10);
+  drawTrophy(ctx, WIDTH / 2, trophyY + 2, 28, C.accent2);
 
   // Title
   ctx.fillStyle = C.accent;
@@ -184,14 +181,11 @@ function renderLeaderboardCard(entries, options = {}) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     if (rank === 1) {
-      ctx.font = '20px sans-serif';
-      ctx.fillText('🥇', PAD + 32, rowCenterY);
+      drawMedal(ctx, PAD + 32, rowCenterY, 12, C.gold, '1');
     } else if (rank === 2) {
-      ctx.font = '20px sans-serif';
-      ctx.fillText('🥈', PAD + 32, rowCenterY);
+      drawMedal(ctx, PAD + 32, rowCenterY, 12, C.silver, '2');
     } else if (rank === 3) {
-      ctx.font = '20px sans-serif';
-      ctx.fillText('🥉', PAD + 32, rowCenterY);
+      drawMedal(ctx, PAD + 32, rowCenterY, 12, C.bronze, '3');
     } else {
       ctx.font = 'bold 14px sans-serif';
       ctx.fillStyle = C.textDim;
@@ -268,13 +262,21 @@ function renderLeaderboardCard(entries, options = {}) {
   ctx.font = '11px sans-serif';
   ctx.fillStyle = C.textDim;
   if (options.resetIn) {
-    ctx.fillText(`⏱ Resets in ${options.resetIn}`, WIDTH / 2, footerY + 24);
+    ctx.fillText(`Resets in ${options.resetIn}`, WIDTH / 2, footerY + 24);
+  }
+
+  // Timer icon (drawn)
+  if (options.resetIn) {
+    drawClockIcon(ctx, WIDTH / 2 - ctx.measureText(`Resets in ${options.resetIn}`).width / 2 - 12, footerY + 24, 6, C.textDim);
   }
 
   // Branding
   ctx.font = 'bold 10px sans-serif';
   ctx.fillStyle = 'rgba(255,107,53,0.4)';
-  ctx.fillText('FLAPPY BERT  •  FLAP TO EARN', WIDTH / 2, footerY + 44);
+  ctx.fillText('FLAPPY BERT  •  FLAP TO EARN', WIDTH / 2, footerY + 42);
+  ctx.font = '8px sans-serif';
+  ctx.fillStyle = 'rgba(0,229,255,0.3)';
+  ctx.fillText('DR. INKER LABS', WIDTH / 2, footerY + 54);
 
   // ── Return PNG buffer ─────────────────────────────────────────────
   return canvas.toBuffer('image/png');
@@ -385,7 +387,7 @@ function renderPlayerCard(playerData, statsData, rank, options = {}) {
     { label: 'GAMES PLAYED',   value: statsData.games_played || 0,         colour: C.accent3 },
     { label: 'MAX LEVEL',      value: statsData.max_level || 0,            colour: C.success },
     { label: 'ALL-TIME BEST',  value: statsData.all_time_best || 0,        colour: C.gold    },
-    { label: 'TOTAL COINS',    value: `${playerData.coins || 0} 🪙`,      colour: C.accent2 },
+    { label: 'TOTAL COINS',    value: playerData.coins || 0,               colour: C.accent2 },
   ];
 
   const cols = 3;
@@ -421,9 +423,119 @@ function renderPlayerCard(playerData, statsData, rank, options = {}) {
   ctx.font = 'bold 10px sans-serif';
   ctx.fillStyle = 'rgba(255,107,53,0.4)';
   ctx.textAlign = 'center';
-  ctx.fillText('FLAPPY BERT  •  FLAP TO EARN', WIDTH / 2, HEIGHT - 16);
+  ctx.fillText('FLAPPY BERT  •  FLAP TO EARN', WIDTH / 2, HEIGHT - 22);
+  ctx.font = '8px sans-serif';
+  ctx.fillStyle = 'rgba(0,229,255,0.3)';
+  ctx.fillText('DR. INKER LABS', WIDTH / 2, HEIGHT - 10);
 
   return canvas.toBuffer('image/png');
+}
+
+// ── Helper: draw a trophy icon ──────────────────────────────────────
+function drawTrophy(ctx, cx, cy, size, colour) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  const s = size / 24;
+  
+  // Cup body
+  ctx.fillStyle = colour;
+  ctx.beginPath();
+  ctx.moveTo(-8 * s, -8 * s);
+  ctx.lineTo(8 * s, -8 * s);
+  ctx.lineTo(6 * s, 6 * s);
+  ctx.quadraticCurveTo(0, 10 * s, -6 * s, 6 * s);
+  ctx.closePath();
+  ctx.fill();
+  
+  // Stem
+  ctx.fillRect(-2 * s, 6 * s, 4 * s, 6 * s);
+  
+  // Base
+  ctx.fillRect(-6 * s, 11 * s, 12 * s, 3 * s);
+  
+  // Handles
+  ctx.strokeStyle = colour;
+  ctx.lineWidth = 2 * s;
+  ctx.beginPath();
+  ctx.arc(-9 * s, -1 * s, 4 * s, -Math.PI * 0.5, Math.PI * 0.5);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(9 * s, -1 * s, 4 * s, Math.PI * 0.5, -Math.PI * 0.5);
+  ctx.stroke();
+  
+  // Shine
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.fillRect(-5 * s, -6 * s, 3 * s, 8 * s);
+  
+  ctx.restore();
+}
+
+// ── Helper: draw a rank medal ───────────────────────────────────────
+function drawMedal(ctx, cx, cy, r, colour, num) {
+  ctx.save();
+  
+  // Ribbon
+  ctx.fillStyle = colour === C.gold ? '#cc3300' : (colour === C.silver ? '#3355aa' : '#225522');
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.5, cy - r);
+  ctx.lineTo(cx - r * 0.8, cy - r * 1.6);
+  ctx.lineTo(cx - r * 0.1, cy - r * 1.2);
+  ctx.lineTo(cx + r * 0.1, cy - r * 1.2);
+  ctx.lineTo(cx + r * 0.8, cy - r * 1.6);
+  ctx.lineTo(cx + r * 0.5, cy - r);
+  ctx.closePath();
+  ctx.fill();
+  
+  // Medal circle
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = colour;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  
+  // Inner ring
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.7, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  
+  // Number
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.font = `bold ${r}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(num, cx, cy + 1);
+  
+  ctx.restore();
+}
+
+// ── Helper: draw a small clock icon ─────────────────────────────────
+function drawClockIcon(ctx, cx, cy, r, colour) {
+  ctx.save();
+  ctx.strokeStyle = colour;
+  ctx.lineWidth = 1.5;
+  
+  // Circle
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+  
+  // Hour hand
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx, cy - r * 0.6);
+  ctx.stroke();
+  
+  // Minute hand
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + r * 0.5, cy);
+  ctx.stroke();
+  
+  ctx.restore();
 }
 
 module.exports = { renderLeaderboardCard, renderPlayerCard };
