@@ -42,7 +42,7 @@ const ROW_GAP      = 4;
 const PAD          = 28;
 const FOOTER_H     = 72;
 const CORNER_R     = 16;
-const MAX_ENTRIES   = 20;
+const MAX_ENTRIES   = 50;
 
 /**
  * Generate a leaderboard card as a PNG Buffer.

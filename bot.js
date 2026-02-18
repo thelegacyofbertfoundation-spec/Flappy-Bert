@@ -117,7 +117,7 @@ bot.onText(/\/leaderboard/, async (msg) => {
   const chatId = msg.chat.id;
 
   try {
-    const entries = db.getWeeklyLeaderboard(20);
+    const entries = db.getWeeklyLeaderboard(50);
     const pngBuffer = renderLeaderboardCard(entries, {
       highlightId: msg.from.id,
       resetIn:     getResetCountdown(),
@@ -190,7 +190,7 @@ bot.onText(/\/help/, (msg) => {
     '🐕 *Flappy Bert Commands*',
     '',
     '🎮 /play — Launch the game',
-    '🏆 /leaderboard — Weekly top 20 card',
+    '🏆 /leaderboard — Weekly top 50 card',
     '📊 /mystats — Your personal stats card',
     '📁 /history — Past weekly leaderboard CSVs',
     '❓ /help — This message',
@@ -268,7 +268,7 @@ bot.on('callback_query', async (query) => {
   if (query.data === 'show_leaderboard') {
     await bot.answerCallbackQuery(query.id);
     try {
-      const entries = db.getWeeklyLeaderboard(20);
+      const entries = db.getWeeklyLeaderboard(50);
       const pngBuffer = renderLeaderboardCard(entries, {
         highlightId: query.from.id,
         resetIn:     getResetCountdown(),
@@ -334,7 +334,7 @@ app.get('/api/leaderboard', (req, res) => {
 // GET /api/leaderboard/image?highlight=TELEGRAM_ID
 app.get('/api/leaderboard/image', (req, res) => {
   try {
-    const entries = db.getWeeklyLeaderboard(20);
+    const entries = db.getWeeklyLeaderboard(50);
     const highlightId = parseInt(req.query.highlight) || null;
     const pngBuffer = renderLeaderboardCard(entries, {
       highlightId,
