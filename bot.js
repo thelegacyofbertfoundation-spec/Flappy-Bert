@@ -48,7 +48,7 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
 
-console.log('🐱  Flappy Bert Bot starting…');
+console.log('🐕  Flappy Bert Bot starting…');
 
 // ── Helper: time until next Monday 00:00 UTC ────────────────────────
 function getResetCountdown() {
@@ -79,18 +79,18 @@ bot.onText(/\/start/, (msg) => {
   db.upsertPlayer(user.id, user.first_name, user.username);
 
   bot.sendMessage(chatId, [
-    '🐱 *Welcome to Flappy Bert!*',
+    '🐕 *Welcome to Flappy Bert!*',
     '',
-    'Tap to flap, dodge the pipes, earn coins!',
+    `Hey ${user.first_name}! Ready to flap?`,
     '',
-    '🏆 Weekly leaderboards reset every Monday at 00:00 UTC',
-    '🛒 Spend coins on skins and power-ups in the shop',
+    'Tap to fly Bert through endless pipes, rack up combos, and earn coins. Climb the weekly leaderboard, complete daily challenges, and unlock skins in the shop.',
     '',
-    'Use the button below to launch the game, or try these commands:',
+    '🏆 Weekly leaderboards — reset every Monday',
+    '🎁 Regular Flap to Earn competitions',
+    '🎯 Daily challenges & login streaks',
+    '⭐ Score multipliers & custom skins',
     '',
-    '/leaderboard — Weekly top 20 (image card)',
-    '/mystats — Your personal stats card',
-    '/help — All commands',
+    'Hit the button below to jump in 👇',
   ].join('\n'), {
     parse_mode: 'Markdown',
     reply_markup: {
@@ -106,7 +106,7 @@ bot.onText(/\/play/, (msg) => {
   bot.sendMessage(msg.chat.id, '🎮 Tap below to play!', {
     reply_markup: {
       inline_keyboard: [[
-        { text: '🐱 Launch Flappy Bert', web_app: { url: WEBAPP_URL } }
+        { text: '🐕 Launch Flappy Bert', web_app: { url: WEBAPP_URL } }
       ]]
     }
   });
@@ -187,7 +187,7 @@ bot.onText(/\/mystats/, async (msg) => {
 // ── /help ───────────────────────────────────────────────────────────
 bot.onText(/\/help/, (msg) => {
   bot.sendMessage(msg.chat.id, [
-    '🐱 *Flappy Bert Commands*',
+    '🐕 *Flappy Bert Commands*',
     '',
     '🎮 /play — Launch the game',
     '🏆 /leaderboard — Weekly top 20 card',
@@ -399,7 +399,7 @@ app.post('/api/share', async (req, res) => {
     const base64Data = image_base64.replace(/^data:image\/\w+;base64,/, '');
     const imageBuffer = Buffer.from(base64Data, 'base64');
     
-    const defaultCaption = `🐱 Flappy Bert Score: ${score || '?'}\n\n🎮 Can you beat me?\n🔗 Play now: ${WEBAPP_URL}`;
+    const defaultCaption = `🐕 Flappy Bert Score: ${score || '?'}\n\n🎮 Can you beat me?\n🔗 Play now: ${WEBAPP_URL}`;
     
     await bot.sendPhoto(telegram_id, imageBuffer, {
       caption: caption || defaultCaption,
@@ -446,7 +446,7 @@ app.get('/game', (req, res) => {
 // ── Start server ────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`🌐  API server running on port ${PORT}`);
-  console.log(`🐱  Bot is polling for messages…`);
+  console.log(`🐕  Bot is polling for messages…`);
   console.log(`📅  Current week: ${db.getWeekStart()}`);
   console.log(`⏱   Reset in: ${getResetCountdown()}`);
   console.log('');
