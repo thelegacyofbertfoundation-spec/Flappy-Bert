@@ -65,6 +65,12 @@ function init() {
       FOREIGN KEY (telegram_id) REFERENCES players(telegram_id)
     );
 
+    CREATE TABLE IF NOT EXISTS banned_players (
+      telegram_id   INTEGER PRIMARY KEY,
+      reason        TEXT,
+      banned_at     TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tscore_tournament
       ON tournament_scores(tournament_id, score DESC);
   `);
@@ -256,6 +262,19 @@ function removeTournamentScores(telegramId, tournamentId) {
     .run(telegramId, tournamentId);
 }
 
+function banPlayer(telegramId, reason) {
+  db.prepare('INSERT OR REPLACE INTO banned_players (telegram_id, reason) VALUES (?, ?)')
+    .run(telegramId, reason || 'cheating');
+}
+
+function unbanPlayer(telegramId) {
+  db.prepare('DELETE FROM banned_players WHERE telegram_id = ?').run(telegramId);
+}
+
+function isBanned(telegramId) {
+  return !!db.prepare('SELECT 1 FROM banned_players WHERE telegram_id = ?').get(telegramId);
+}
+
 // ── Weekly CSV Archive ────────────────────────────────────────────────
 
 function archiveWeek(weekStart) {
@@ -340,6 +359,9 @@ module.exports = {
   removePlayerWeekScores,
   removeAllPlayerScores,
   removeTournamentScores,
+  banPlayer,
+  unbanPlayer,
+  isBanned,
   archiveWeek,
   getArchiveList,
   getArchivePath,
