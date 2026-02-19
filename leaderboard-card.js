@@ -538,4 +538,175 @@ function drawClockIcon(ctx, cx, cy, r, colour) {
   ctx.restore();
 }
 
-module.exports = { renderLeaderboardCard, renderPlayerCard };
+/**
+ * Render a tournament leaderboard card.
+ */
+function renderTournamentCard(entries, options = {}) {
+  const count  = Math.min(entries.length, MAX_ENTRIES);
+  const height = HEADER_H + 20 + count * (ROW_H + ROW_GAP) + FOOTER_H + PAD * 2;
+
+  const canvas = createCanvas(WIDTH, height);
+  const ctx    = canvas.getContext('2d');
+
+  // Background — slightly different gradient for tournament feel
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
+  bgGrad.addColorStop(0, '#0d0520');
+  bgGrad.addColorStop(0.3, '#0a0e1a');
+  bgGrad.addColorStop(1, '#06080f');
+  ctx.fillStyle = bgGrad;
+  roundRect(ctx, 0, 0, WIDTH, height, CORNER_R);
+  ctx.fill();
+
+  // Border — gold for tournament
+  ctx.strokeStyle = 'rgba(255,215,0,0.45)';
+  ctx.lineWidth = 2;
+  roundRect(ctx, 1, 1, WIDTH - 2, height - 2, CORNER_R);
+  ctx.stroke();
+
+  drawCornerAccents(ctx, WIDTH, height);
+
+  // Header
+  const trophyY = 30;
+  drawTrophy(ctx, WIDTH / 2, trophyY + 2, 28, C.gold);
+
+  // Tournament name
+  ctx.fillStyle = C.gold;
+  ctx.font = 'bold 24px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(options.name || 'TOURNAMENT', WIDTH / 2, trophyY + 48);
+
+  // Sponsor
+  if (options.sponsor) {
+    ctx.fillStyle = C.accent3;
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText(`Sponsored by ${options.sponsor}`, WIDTH / 2, trophyY + 70);
+  }
+
+  // Status badge
+  if (options.status) {
+    const isLive = options.status.includes('LIVE');
+    ctx.fillStyle = isLive ? C.success : C.textDim;
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillText(options.status, WIDTH / 2, trophyY + 92);
+  }
+
+  // Decorative line under header
+  const lineY = HEADER_H + 12;
+  const lineGrad = ctx.createLinearGradient(PAD, lineY, WIDTH - PAD, lineY);
+  lineGrad.addColorStop(0, 'rgba(255,215,0,0)');
+  lineGrad.addColorStop(0.2, 'rgba(255,215,0,0.6)');
+  lineGrad.addColorStop(0.5, 'rgba(255,215,0,0.8)');
+  lineGrad.addColorStop(0.8, 'rgba(255,215,0,0.6)');
+  lineGrad.addColorStop(1, 'rgba(255,215,0,0)');
+  ctx.fillStyle = lineGrad;
+  ctx.fillRect(PAD, lineY, WIDTH - PAD * 2, 2);
+
+  // Column headers
+  const colY = HEADER_H + 24;
+  ctx.font = 'bold 9px sans-serif';
+  ctx.fillStyle = C.textDim;
+  ctx.textAlign = 'left';
+  ctx.fillText('RANK', PAD + 14, colY);
+  ctx.fillText('PLAYER', PAD + 80, colY);
+  ctx.textAlign = 'right';
+  ctx.fillText('SCORE', WIDTH - PAD - 120, colY);
+  ctx.fillText('LEVEL', WIDTH - PAD - 50, colY);
+  ctx.fillText('GAMES', WIDTH - PAD - 4, colY);
+
+  // Rows
+  const startY = HEADER_H + 32;
+  for (let i = 0; i < count; i++) {
+    const entry = entries[i];
+    const rank  = i + 1;
+    const y     = startY + i * (ROW_H + ROW_GAP);
+
+    // Row background
+    const isHighlighted = options.highlightId && entry.telegram_id === options.highlightId;
+    if (isHighlighted) {
+      ctx.fillStyle = 'rgba(255,215,0,0.12)';
+    } else if (rank <= 3) {
+      ctx.fillStyle = rank === 1 ? 'rgba(255,215,0,0.08)' : (rank === 2 ? 'rgba(192,192,192,0.06)' : 'rgba(205,127,50,0.06)');
+    } else {
+      ctx.fillStyle = i % 2 === 0 ? C.bgRow : C.bgRowAlt;
+    }
+    roundRect(ctx, PAD, y, WIDTH - PAD * 2, ROW_H, 8);
+    ctx.fill();
+
+    if (isHighlighted) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,215,0,0.5)';
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, PAD, y, WIDTH - PAD * 2, ROW_H, 8);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    const rowCenterY = y + ROW_H / 2;
+
+    // Rank
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (rank <= 3) {
+      drawMedal(ctx, PAD + 32, rowCenterY, 12, rank === 1 ? C.gold : (rank === 2 ? C.silver : C.bronze), String(rank));
+    } else {
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillStyle = C.textDim;
+      ctx.fillText(`#${rank}`, PAD + 32, rowCenterY);
+    }
+
+    // Avatar dot
+    const skinColour = SKIN_COLOURS[entry.skin || 'default'] || C.accent;
+    const dotX = PAD + 68;
+    ctx.beginPath();
+    ctx.arc(dotX, rowCenterY, 10, 0, Math.PI * 2);
+    ctx.fillStyle = skinColour;
+    ctx.fill();
+
+    // Player name
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const prefix = isHighlighted ? '\u25B6 ' : '';
+    ctx.font = isHighlighted ? 'bold 13px sans-serif' : '13px sans-serif';
+    ctx.fillStyle = isHighlighted ? C.gold : C.text;
+    const name = prefix + (entry.first_name || entry.username || 'Player');
+    ctx.fillText(name.substring(0, 18), PAD + 86, rowCenterY);
+
+    // Score
+    ctx.textAlign = 'right';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillStyle = rank <= 3 ? C.gold : C.accent2;
+    ctx.fillText(String(entry.best_score), WIDTH - PAD - 120, rowCenterY);
+
+    // Level
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = C.success;
+    ctx.fillText(String(entry.max_level || 1), WIDTH - PAD - 54, rowCenterY);
+
+    // Games
+    ctx.fillStyle = C.accent3;
+    ctx.fillText(String(entry.games_played || 0), WIDTH - PAD - 8, rowCenterY);
+  }
+
+  // Footer
+  const footerY = height - FOOTER_H;
+
+  const fLineGrad = ctx.createLinearGradient(PAD, footerY, WIDTH - PAD, footerY);
+  fLineGrad.addColorStop(0, 'rgba(255,215,0,0)');
+  fLineGrad.addColorStop(0.5, 'rgba(255,215,0,0.4)');
+  fLineGrad.addColorStop(1, 'rgba(255,215,0,0)');
+  ctx.fillStyle = fLineGrad;
+  ctx.fillRect(PAD, footerY + 4, WIDTH - PAD * 2, 1);
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 10px sans-serif';
+  ctx.fillStyle = 'rgba(255,215,0,0.4)';
+  ctx.fillText('FLAPPY BERT  •  TOURNAMENT MODE', WIDTH / 2, footerY + 24);
+  ctx.font = '8px sans-serif';
+  ctx.fillStyle = 'rgba(0,229,255,0.3)';
+  ctx.fillText('DR. INKER LABS', WIDTH / 2, footerY + 38);
+
+  return canvas.toBuffer('image/png');
+}
+
+module.exports = { renderLeaderboardCard, renderPlayerCard, renderTournamentCard };

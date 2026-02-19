@@ -440,6 +440,17 @@ html, body {
   </div>
 </div>
 
+<!-- Tournament Leaderboard -->
+<div class="overlay" id="tournamentOverlay">
+  <div class="shop-panel" style="border-color:#ffd700">
+    <div class="shop-title" style="color:#ffd700">&#x1F3DF; CHAMPIONS FLAP-OFF</div>
+    <div style="font-size:clamp(5px,1.2vw,7px);color:#00e5ff;margin:-8px 0 8px;letter-spacing:1px">Sponsored by TraderSZ</div>
+    <div id="tournamentStatusOverlay" style="font-size:clamp(5px,1.2vw,7px);margin-bottom:8px"></div>
+    <div id="tournamentList" style="max-height:50vh;overflow-y:auto"></div>
+    <button class="btn btn-secondary" style="margin-top:12px" onclick="hideAllOverlays();showOverlay('menuOverlay')">&#x2190; BACK</button>
+  </div>
+</div>
+
 <!-- Daily Challenges Panel -->
 <div class="overlay" id="challengeOverlay">
   <div class="shop-panel" style="border-color:var(--accent2)">
@@ -478,6 +489,8 @@ html, body {
   <button class="btn btn-secondary" onclick="showShop()">&#x1F6D2; SHOP</button>
   <button class="btn btn-secondary" onclick="showChallenges()" style="border-color:var(--accent2);color:var(--accent2)">&#x1F3AF; CHALLENGES</button>
   <button class="btn btn-gold" onclick="showLeaderboard()">&#x1F3C6; RANKINGS</button>
+  <button class="btn btn-secondary" id="tournamentBtn" onclick="showTournament()" style="display:none;border-color:#ffd700;color:#ffd700;animation:pulse 2s infinite">&#x1F3DF; TOURNAMENT</button>
+  <div id="tournamentStatus" style="font-size:clamp(5px,1.2vw,7px);color:#ffd700;margin-top:4px;display:none"></div>
   <div id="menuStreak" style="font-size:clamp(6px,1.4vw,8px);color:var(--accent2);margin-top:10px;display:none">&#x1F525; STREAK: <span id="menuStreakCount">0</span> DAYS</div>
   <div style="margin-top:24px;opacity:0.35;text-align:center">
     <div style="font-size:clamp(5px,1.2vw,7px);color:#7a7e9a;letter-spacing:2px">BUILT BY</div>
@@ -497,6 +510,7 @@ html, body {
     <div class="go-level" id="goLevel">LEVEL 1</div>
     <div id="goCombo" style="font-size:7px;color:#ffb800;margin:4px 0;display:none"></div>
     <div id="goMultiplier" style="font-size:7px;color:var(--accent3);margin:4px 0;display:none"></div>
+    <div id="goTournament" style="font-size:7px;color:#ffd700;margin:4px 0;display:none"></div>
     <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
       <button class="btn btn-primary" onclick="startGame()">&#x1F504; RETRY</button>
       <button class="btn btn-gold" style="min-width:100px" onclick="shareScoreCard()">&#x1F4F7; SHARE</button>
@@ -643,6 +657,9 @@ function init() {
   
   // Check daily streak & challenges
   checkDailyLogin();
+  
+  // Tournament UI
+  updateTournamentUI();
   
   window.addEventListener('resize', resizeCanvas);
   
@@ -1221,6 +1238,7 @@ function showGameOverScreen() {
   saveData();  // Save BEFORE server submit — sendData() can close the WebApp
   updateCoinDisplay();
   submitScoreToServer(G.score, G.level, G.coinsEarned);
+  submitTournamentScore(G.score, G.level, G.coinsEarned);
   
   document.getElementById('scoreDisplay').style.display = 'none';
   document.getElementById('levelIndicator').style.display = 'none';
@@ -1257,6 +1275,15 @@ function showGameOverScreen() {
     multEl.style.display = 'block';
   } else {
     multEl.style.display = 'none';
+  }
+  
+  // Tournament display
+  const tournEl = document.getElementById('goTournament');
+  if (getTournamentStatus() === 'live') {
+    tournEl.innerHTML = '\u{1F3DF} CHAMPIONS FLAP-OFF \u{2014} SCORE SUBMITTED!';
+    tournEl.style.display = 'block';
+  } else {
+    tournEl.style.display = 'none';
   }
   
   showOverlay('gameOverOverlay');
@@ -2312,6 +2339,149 @@ function renderChallenges() {
   });
   
   document.getElementById('challengeList').innerHTML = html;
+}
+
+// ========== TOURNAMENT SYSTEM ==========
+const TOURNAMENT = {
+  id: 'champions-flapoff-1',
+  name: 'Champions Flap-off',
+  sponsor: 'TraderSZ',
+  start: new Date('2026-02-19T17:00:00Z'),
+  end: new Date('2026-03-19T23:59:59Z'),
+};
+
+function getTournamentStatus() {
+  const now = new Date();
+  if (now < TOURNAMENT.start) return 'scheduled';
+  if (now <= TOURNAMENT.end) return 'live';
+  return 'ended';
+}
+
+function getTournamentCountdown() {
+  const now = new Date();
+  const status = getTournamentStatus();
+  if (status === 'scheduled') {
+    const diff = TOURNAMENT.start.getTime() - now.getTime();
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    const s = Math.floor((diff % 60000) / 1000);
+    return `Starts in ${h}h ${m}m ${s}s`;
+  }
+  if (status === 'live') {
+    const diff = TOURNAMENT.end.getTime() - now.getTime();
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    return `LIVE — Ends in ${h}h ${m}m`;
+  }
+  return 'Tournament ended';
+}
+
+function updateTournamentUI() {
+  const btn = document.getElementById('tournamentBtn');
+  const statusEl = document.getElementById('tournamentStatus');
+  const status = getTournamentStatus();
+  const now = new Date();
+  
+  // Show button if within 2 hours of start, during, or after
+  const showTime = new Date(TOURNAMENT.start.getTime() - 2 * 3600000);
+  if (now >= showTime) {
+    btn.style.display = '';
+    statusEl.style.display = '';
+    
+    if (status === 'scheduled') {
+      statusEl.textContent = getTournamentCountdown();
+      statusEl.style.color = '#7a7e9a';
+    } else if (status === 'live') {
+      statusEl.innerHTML = '\u{1F534} ' + getTournamentCountdown();
+      statusEl.style.color = '#44d62c';
+      btn.style.borderColor = '#44d62c';
+      btn.style.color = '#44d62c';
+    } else {
+      statusEl.textContent = '\u{1F3C1} Tournament ended';
+      statusEl.style.color = '#7a7e9a';
+      btn.style.borderColor = '#7a7e9a';
+      btn.style.color = '#7a7e9a';
+    }
+  } else {
+    btn.style.display = 'none';
+    statusEl.style.display = 'none';
+  }
+}
+
+// Update tournament UI every second
+setInterval(updateTournamentUI, 1000);
+
+async function showTournament() {
+  hideAllOverlays();
+  showOverlay('tournamentOverlay');
+  
+  const statusEl = document.getElementById('tournamentStatusOverlay');
+  const status = getTournamentStatus();
+  if (status === 'live') {
+    statusEl.innerHTML = '\u{1F534} <span style="color:#44d62c">LIVE</span> — ' + getTournamentCountdown();
+  } else if (status === 'scheduled') {
+    statusEl.innerHTML = '\u{23F3} ' + getTournamentCountdown();
+    statusEl.style.color = '#7a7e9a';
+  } else {
+    statusEl.innerHTML = '\u{1F3C1} <span style="color:#7a7e9a">Tournament ended — Final standings</span>';
+  }
+  
+  // Fetch tournament leaderboard from server
+  const listEl = document.getElementById('tournamentList');
+  listEl.innerHTML = '<div style="text-align:center;color:var(--text-dim);font-size:7px;padding:20px">Loading...</div>';
+  
+  try {
+    const res = await fetch((API_BASE || '') + '/api/tournament/' + TOURNAMENT.id);
+    const data = await res.json();
+    renderTournamentLeaderboard(data.entries || []);
+  } catch(e) {
+    listEl.innerHTML = '<div style="text-align:center;color:var(--text-dim);font-size:7px;padding:20px">Could not load leaderboard</div>';
+  }
+}
+
+function renderTournamentLeaderboard(entries) {
+  const listEl = document.getElementById('tournamentList');
+  const user = getTelegramUser();
+  
+  if (entries.length === 0) {
+    listEl.innerHTML = '<div style="text-align:center;color:var(--text-dim);font-size:7px;padding:20px">No scores yet — be the first!</div>';
+    return;
+  }
+  
+  let html = '';
+  entries.forEach((e, i) => {
+    const rank = i + 1;
+    const isYou = user && e.telegram_id === user.id;
+    const medal = rank === 1 ? '\u{1F947}' : (rank === 2 ? '\u{1F948}' : (rank === 3 ? '\u{1F949}' : '#' + rank));
+    const bg = isYou ? 'rgba(255,215,0,0.15)' : (rank <= 3 ? 'rgba(255,215,0,0.06)' : 'rgba(255,255,255,0.03)');
+    const border = isYou ? 'border:1px solid rgba(255,215,0,0.4);' : '';
+    const nameColor = isYou ? '#ffd700' : '#e8e8f0';
+    const name = (isYou ? '\u{25B6} ' : '') + (e.first_name || e.username || 'Player');
+    
+    html += `<div style="display:flex;align-items:center;padding:6px 8px;margin:3px 0;border-radius:6px;background:${bg};${border}">`;
+    html += `<div style="width:28px;text-align:center;font-size:${rank<=3?'12px':'8px'};flex-shrink:0">${medal}</div>`;
+    html += `<div style="flex:1;font-size:8px;color:${nameColor};margin-left:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</div>`;
+    html += `<div style="font-size:10px;font-weight:bold;color:#ffd700;margin-left:8px">${e.best_score}</div>`;
+    html += `<div style="font-size:7px;color:#7a7e9a;margin-left:8px;width:20px;text-align:right">${e.games_played}g</div>`;
+    html += '</div>';
+  });
+  
+  listEl.innerHTML = html;
+}
+
+async function submitTournamentScore(score, level, coinsEarned) {
+  if (getTournamentStatus() !== 'live') return;
+  const user = getTelegramUser();
+  if (!user) return;
+  try {
+    await fetch((API_BASE || '') + '/api/tournament/' + TOURNAMENT.id + '/score', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        telegram_id: user.id, score, level, coins_earned: coinsEarned,
+      }),
+    });
+  } catch(e) {}
 }
 
 // ========== SHARE SCORE CARD ==========

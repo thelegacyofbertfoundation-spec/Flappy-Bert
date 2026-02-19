@@ -27,7 +27,7 @@ const express     = require('express');
 const cors        = require('cors');
 const path        = require('path');
 const db          = require('./db');
-const { renderLeaderboardCard, renderPlayerCard } = require('./leaderboard-card');
+const { renderLeaderboardCard, renderPlayerCard, renderTournamentCard } = require('./leaderboard-card');
 
 // ── Config ──────────────────────────────────────────────────────────
 const BOT_TOKEN  = process.env.BOT_TOKEN;
@@ -47,6 +47,15 @@ const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
+
+// Seed tournaments
+db.createTournament(
+  'champions-flapoff-1',
+  'Champions Flap-off',
+  'TraderSZ',
+  '2026-02-19T17:00:00Z',
+  '2026-03-19T23:59:59Z'
+);
 
 console.log('🐕  Flappy Bert Bot starting…');
 
@@ -192,6 +201,7 @@ bot.onText(/\/help/, (msg) => {
     '🎮 /play — Launch the game',
     '🏆 /leaderboard — Weekly top 50 card',
     '📊 /mystats — Your personal stats card',
+    '🏟 /tournament — Tournament leaderboard',
     '📁 /history — Past weekly leaderboard CSVs',
     '❓ /help — This message',
     '',
@@ -225,6 +235,62 @@ bot.onText(/\/history/, async (msg) => {
       filename: latest.filename,
       contentType: 'text/csv',
     });
+  }
+});
+
+// ── /tournament — show tournament leaderboard ────────────────────────
+bot.onText(/\/tournament/, async (msg) => {
+  const chatId = msg.chat.id;
+  const tournaments = db.getAllTournaments();
+  
+  if (tournaments.length === 0) {
+    bot.sendMessage(chatId, '🏟 No tournaments yet. Stay tuned!');
+    return;
+  }
+  
+  // Show the most recent tournament
+  const t = tournaments[0];
+  const now = new Date();
+  const start = new Date(t.start_time);
+  const end = new Date(t.end_time);
+  
+  let statusText;
+  if (now < start) {
+    const diff = start.getTime() - now.getTime();
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    statusText = `⏳ Starts in ${h}h ${m}m`;
+  } else if (now <= end) {
+    const diff = end.getTime() - now.getTime();
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    statusText = `🔴 LIVE — Ends in ${h}h ${m}m`;
+  } else {
+    statusText = '🏁 Tournament ended';
+  }
+  
+  try {
+    const entries = db.getTournamentLeaderboard(t.id, 50);
+    const pngBuffer = renderTournamentCard(entries, {
+      name: t.name,
+      sponsor: t.sponsor,
+      status: statusText,
+      highlightId: msg.from.id,
+    });
+    
+    const rank = db.getTournamentPlayerRank(t.id, msg.from.id);
+    const rankText = rank ? `\n🏅 Your rank: #${rank}` : '';
+    
+    await bot.sendPhoto(chatId, pngBuffer, {
+      caption: `🏟 *${t.name}*\nSponsored by ${t.sponsor}\n\n${statusText}${rankText}\n\nUse /play to compete!`,
+      parse_mode: 'Markdown',
+    }, {
+      filename: 'tournament.png',
+      contentType: 'image/png',
+    });
+  } catch (err) {
+    console.error('Tournament error:', err);
+    bot.sendMessage(chatId, '❌ Failed to generate tournament leaderboard.');
   }
 });
 
@@ -419,6 +485,60 @@ app.post('/api/share', async (req, res) => {
 // GET /api/archives — List all archived weeks
 app.get('/api/archives', (req, res) => {
   res.json({ archives: db.getArchiveList() });
+});
+
+// ── Tournament API ───────────────────────────────────────────────────
+
+// GET /api/tournaments — List all tournaments with status
+app.get('/api/tournaments', (req, res) => {
+  const tournaments = db.getAllTournaments().map(t => {
+    const now = new Date();
+    const start = new Date(t.start_time);
+    const end = new Date(t.end_time);
+    let status = 'ended';
+    if (now < start) status = 'scheduled';
+    else if (now <= end) status = 'live';
+    return { ...t, status };
+  });
+  res.json({ tournaments });
+});
+
+// GET /api/tournament/:id — Tournament info + leaderboard
+app.get('/api/tournament/:id', (req, res) => {
+  const t = db.getTournament(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Tournament not found' });
+  
+  const now = new Date();
+  const start = new Date(t.start_time);
+  const end = new Date(t.end_time);
+  let status = 'ended';
+  if (now < start) status = 'scheduled';
+  else if (now <= end) status = 'live';
+  
+  const entries = db.getTournamentLeaderboard(t.id, 50);
+  res.json({ tournament: { ...t, status }, entries });
+});
+
+// POST /api/tournament/:id/score — Submit score to tournament
+app.post('/api/tournament/:id/score', (req, res) => {
+  const t = db.getTournament(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Tournament not found' });
+  
+  const now = new Date();
+  const start = new Date(t.start_time);
+  const end = new Date(t.end_time);
+  if (now < start || now > end) {
+    return res.status(400).json({ error: 'Tournament not active' });
+  }
+  
+  const { telegram_id, score, level, coins_earned } = req.body;
+  if (!telegram_id || score == null) {
+    return res.status(400).json({ error: 'telegram_id and score required' });
+  }
+  
+  db.submitTournamentScore(req.params.id, telegram_id, score, level || 1, coins_earned || 0);
+  const rank = db.getTournamentPlayerRank(req.params.id, telegram_id);
+  res.json({ ok: true, rank });
 });
 
 // GET /api/archives/:week — Download a specific week's CSV

@@ -42,6 +42,31 @@ function init() {
 
     CREATE INDEX IF NOT EXISTS idx_scores_player
       ON scores(telegram_id, week_start);
+
+    CREATE TABLE IF NOT EXISTS tournaments (
+      id            TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      sponsor       TEXT,
+      start_time    TEXT NOT NULL,
+      end_time      TEXT NOT NULL,
+      status        TEXT DEFAULT 'scheduled',
+      created_at    TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS tournament_scores (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      tournament_id   TEXT NOT NULL,
+      telegram_id     INTEGER NOT NULL,
+      score           INTEGER NOT NULL,
+      level           INTEGER DEFAULT 1,
+      coins_earned    INTEGER DEFAULT 0,
+      played_at       TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (tournament_id) REFERENCES tournaments(id),
+      FOREIGN KEY (telegram_id) REFERENCES players(telegram_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tscore_tournament
+      ON tournament_scores(tournament_id, score DESC);
   `);
 
   return db;
@@ -158,6 +183,63 @@ function getAllTimeStats(telegramId) {
   `).get(telegramId);
 }
 
+// ── Tournaments ──────────────────────────────────────────────────────
+
+function createTournament(id, name, sponsor, startTime, endTime) {
+  db.prepare(`
+    INSERT OR IGNORE INTO tournaments (id, name, sponsor, start_time, end_time)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(id, name, sponsor, startTime, endTime);
+}
+
+function getTournament(id) {
+  return db.prepare('SELECT * FROM tournaments WHERE id = ?').get(id);
+}
+
+function getActiveTournaments() {
+  const now = new Date().toISOString();
+  return db.prepare(`
+    SELECT * FROM tournaments
+    WHERE start_time <= ? AND end_time >= ?
+  `).all(now, now);
+}
+
+function getAllTournaments() {
+  return db.prepare('SELECT * FROM tournaments ORDER BY start_time DESC').all();
+}
+
+function submitTournamentScore(tournamentId, telegramId, score, level, coinsEarned) {
+  db.prepare(`
+    INSERT INTO tournament_scores (tournament_id, telegram_id, score, level, coins_earned)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(tournamentId, telegramId, score, level, coinsEarned);
+}
+
+function getTournamentLeaderboard(tournamentId, limit = 50) {
+  return db.prepare(`
+    SELECT
+      p.telegram_id,
+      p.first_name,
+      p.username,
+      p.skin,
+      MAX(ts.score) AS best_score,
+      COUNT(ts.id)  AS games_played,
+      MAX(ts.level) AS max_level
+    FROM tournament_scores ts
+    JOIN players p ON p.telegram_id = ts.telegram_id
+    WHERE ts.tournament_id = ?
+    GROUP BY ts.telegram_id
+    ORDER BY best_score DESC
+    LIMIT ?
+  `).all(tournamentId, limit);
+}
+
+function getTournamentPlayerRank(tournamentId, telegramId) {
+  const lb = getTournamentLeaderboard(tournamentId, 1000);
+  const idx = lb.findIndex(e => e.telegram_id === telegramId);
+  return idx >= 0 ? idx + 1 : null;
+}
+
 // ── Weekly CSV Archive ────────────────────────────────────────────────
 
 function archiveWeek(weekStart) {
@@ -232,6 +314,13 @@ module.exports = {
   getPlayerWeeklyBest,
   getPlayerRank,
   getAllTimeStats,
+  createTournament,
+  getTournament,
+  getActiveTournaments,
+  getAllTournaments,
+  submitTournamentScore,
+  getTournamentLeaderboard,
+  getTournamentPlayerRank,
   archiveWeek,
   getArchiveList,
   getArchivePath,
