@@ -968,6 +968,9 @@ function updateCoinDisplay() {
 // ========== GAME MECHANICS ==========
 function startGame() {
   hideAllOverlays();
+  
+  // Request anti-cheat session from server
+  requestGameSession();
   G.state = 'ready';
   G.score = 0;
   G.coinsEarned = 0;
@@ -2479,6 +2482,7 @@ async function submitTournamentScore(score, level, coinsEarned) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         telegram_id: user.id, score, level, coins_earned: coinsEarned,
+        session_id: _gameSession,
       }),
     });
   } catch(e) {}
@@ -2722,6 +2726,9 @@ function showToast(msg, type = 'info') {
 // ========== TELEGRAM & API INTEGRATION ==========
 const API_BASE = ''; // Set to your server URL after deploy, e.g. 'https://your-server.com'
 
+let _gameSession = null;
+let _gameStartTime = 0;
+
 function getTelegramUser() {
   try {
     if (window.Telegram && window.Telegram.WebApp) {
@@ -2732,11 +2739,26 @@ function getTelegramUser() {
   return null;
 }
 
-async function submitScoreToServer(score, level, coinsEarned) {
-  // Note: Do NOT use Telegram.WebApp.sendData() — it closes the Mini App
-  // and prevents subsequent saves. Use HTTP API instead.
+async function requestGameSession() {
   const user = getTelegramUser();
   if (!user) return;
+  _gameStartTime = Date.now();
+  try {
+    const res = await fetch((API_BASE || '') + '/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ telegram_id: user.id }),
+    });
+    const data = await res.json();
+    _gameSession = data.session_id || null;
+  } catch(e) { _gameSession = null; }
+}
+
+async function submitScoreToServer(score, level, coinsEarned) {
+  const user = getTelegramUser();
+  if (!user) return;
+  const duration = Date.now() - _gameStartTime;
+  const frames = G.frameCount || 0;
   try {
     await fetch((API_BASE || '') + '/api/score', {
       method: 'POST',
@@ -2744,6 +2766,8 @@ async function submitScoreToServer(score, level, coinsEarned) {
       body: JSON.stringify({
         telegram_id: user.id, first_name: user.first_name,
         username: user.username, score, level, coins_earned: coinsEarned,
+        session_id: _gameSession,
+        frames, duration,
       }),
     });
   } catch(e) {}

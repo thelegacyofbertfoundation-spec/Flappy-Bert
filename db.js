@@ -240,6 +240,22 @@ function getTournamentPlayerRank(tournamentId, telegramId) {
   return idx >= 0 ? idx + 1 : null;
 }
 
+// ── Admin: score removal ─────────────────────────────────────────────
+
+function removePlayerWeekScores(telegramId, weekStart) {
+  db.prepare('DELETE FROM scores WHERE telegram_id = ? AND week_start = ?')
+    .run(telegramId, weekStart);
+}
+
+function removeAllPlayerScores(telegramId) {
+  db.prepare('DELETE FROM scores WHERE telegram_id = ?').run(telegramId);
+}
+
+function removeTournamentScores(telegramId, tournamentId) {
+  db.prepare('DELETE FROM tournament_scores WHERE telegram_id = ? AND tournament_id = ?')
+    .run(telegramId, tournamentId);
+}
+
 // ── Weekly CSV Archive ────────────────────────────────────────────────
 
 function archiveWeek(weekStart) {
@@ -321,6 +337,9 @@ module.exports = {
   submitTournamentScore,
   getTournamentLeaderboard,
   getTournamentPlayerRank,
+  removePlayerWeekScores,
+  removeAllPlayerScores,
+  removeTournamentScores,
   archiveWeek,
   getArchiveList,
   getArchivePath,

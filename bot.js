@@ -26,6 +26,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const express     = require('express');
 const cors        = require('cors');
 const path        = require('path');
+const crypto    = require('crypto');
 const db          = require('./db');
 const { renderLeaderboardCard, renderPlayerCard, renderTournamentCard } = require('./leaderboard-card');
 
@@ -34,6 +35,77 @@ const BOT_TOKEN  = process.env.BOT_TOKEN;
 const WEBAPP_URL = process.env.WEBAPP_URL || 'https://your-domain.com/flappy_bert.html';
 const PORT       = process.env.PORT || 3000;
 const API_SECRET = process.env.API_SECRET || '';
+
+// ── Anti-cheat: game sessions ────────────────────────────────────────
+const gameSessions = new Map(); // sessionId -> { telegramId, startedAt, used }
+const SCORE_LIMITS = {
+  MAX_SCORE_PER_SECOND: 1.2,    // ~1 pipe per 0.8s at max speed is generous
+  MAX_ABSOLUTE_SCORE: 500,       // hard cap — anything above is suspicious
+  MIN_GAME_DURATION_MS: 3000,    // must play at least 3 seconds
+  MAX_LEVEL_FOR_SCORE: (s) => Math.floor(s / 10) + 2, // level can't exceed this for given score
+  MAX_COINS_FOR_SCORE: (s, mult) => Math.ceil(s * (mult || 2)) + 100, // generous coin cap
+};
+
+// Clean up old sessions every 5 minutes
+setInterval(() => {
+  const cutoff = Date.now() - 30 * 60 * 1000; // 30 min old
+  for (const [id, sess] of gameSessions) {
+    if (sess.startedAt < cutoff) gameSessions.delete(id);
+  }
+}, 5 * 60 * 1000);
+
+function generateSessionId() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+function validateScore(session, body) {
+  const { score, level, coins_earned, frames, duration } = body;
+  const issues = [];
+  
+  // 1. Session must exist and be unused
+  if (!session) return { valid: false, reason: 'invalid_session' };
+  if (session.used) return { valid: false, reason: 'session_reused' };
+  
+  // 2. Time-based validation — must play at least 3 seconds
+  const elapsed = Date.now() - session.startedAt;
+  if (elapsed < SCORE_LIMITS.MIN_GAME_DURATION_MS) {
+    issues.push('too_fast');
+  }
+  
+  // 3. Score plausibility — score vs time played
+  const maxScoreForTime = Math.ceil((elapsed / 1000) * SCORE_LIMITS.MAX_SCORE_PER_SECOND);
+  if (score > maxScoreForTime) {
+    issues.push('score_exceeds_time');
+  }
+  
+  // 4. Hard score cap
+  if (score > SCORE_LIMITS.MAX_ABSOLUTE_SCORE) {
+    issues.push('exceeds_cap');
+  }
+  
+  // 5. Level consistency
+  if (level > SCORE_LIMITS.MAX_LEVEL_FOR_SCORE(score)) {
+    issues.push('level_mismatch');
+  }
+  
+  // 6. Frame count sanity — game runs at ~60fps
+  if (frames && duration) {
+    const expectedFrames = (duration / 1000) * 60;
+    if (frames < expectedFrames * 0.3 || frames > expectedFrames * 2) {
+      issues.push('frame_mismatch');
+    }
+  }
+  
+  // Hard fails = rejected, soft issues = logged but allowed
+  const hardFails = ['invalid_session', 'session_reused', 'exceeds_cap', 'score_exceeds_time', 'too_fast'];
+  const isHardFail = issues.some(i => hardFails.includes(i));
+  
+  if (issues.length > 0) {
+    console.log(`⚠️  Score validation [${session.telegramId}]: score=${score} issues=[${issues.join(',')}] elapsed=${elapsed}ms ${isHardFail ? 'REJECTED' : 'FLAGGED'}`);
+  }
+  
+  return { valid: !isHardFail, issues, flagged: issues.length > 0 };
+}
 
 if (!BOT_TOKEN) {
   console.error('❌  BOT_TOKEN environment variable is required.');
@@ -364,22 +436,57 @@ function authMiddleware(req, res, next) {
   next();
 }
 
+// POST /api/session — Start a game session (called when game starts)
+app.post('/api/session', (req, res) => {
+  const { telegram_id } = req.body;
+  if (!telegram_id) return res.status(400).json({ error: 'telegram_id required' });
+  
+  const sessionId = generateSessionId();
+  gameSessions.set(sessionId, {
+    id: sessionId,
+    telegramId: telegram_id,
+    startedAt: Date.now(),
+    used: false,
+  });
+  
+  res.json({ session_id: sessionId, server_time: Date.now() });
+});
+
 // POST /api/score
-// Body: { telegram_id, first_name, username?, score, level, coins_earned }
-app.post('/api/score', authMiddleware, (req, res) => {
+// Body: { telegram_id, first_name, username?, score, level, coins_earned, session_id, frames, duration, signature }
+app.post('/api/score', (req, res) => {
   try {
-    const { telegram_id, first_name, username, score, level, coins_earned } = req.body;
+    const { telegram_id, first_name, username, score, level, coins_earned, session_id, frames, duration, signature } = req.body;
 
     if (!telegram_id || score == null) {
       return res.status(400).json({ error: 'telegram_id and score are required' });
     }
+
+    // Validate with anti-cheat
+    const session = gameSessions.get(session_id);
+    
+    // Check session belongs to this user
+    if (session && session.telegramId !== telegram_id) {
+      console.log(`⚠️  Session hijack attempt: session=${session_id} owner=${session.telegramId} submitter=${telegram_id}`);
+      return res.status(403).json({ error: 'Invalid session' });
+    }
+    
+    const validation = validateScore(session, { score, level, coins_earned, frames, duration, signature });
+    
+    if (!validation.valid) {
+      console.log(`🚫 Score REJECTED [${telegram_id}]: score=${score} reason=${validation.reason || validation.issues.join(',')}`);
+      return res.status(403).json({ error: 'Score rejected', reason: validation.reason });
+    }
+    
+    // Mark session as used
+    if (session) session.used = true;
 
     db.upsertPlayer(telegram_id, first_name || 'Player', username || null);
     db.submitScore(telegram_id, score, level || 1, coins_earned || 0);
 
     const rank = db.getPlayerRank(telegram_id);
 
-    res.json({ ok: true, rank, weekStart: db.getWeekStart() });
+    res.json({ ok: true, rank, weekStart: db.getWeekStart(), flagged: validation.flagged });
   } catch (err) {
     console.error('API score error:', err);
     res.status(500).json({ error: 'Internal error' });
@@ -531,9 +638,19 @@ app.post('/api/tournament/:id/score', (req, res) => {
     return res.status(400).json({ error: 'Tournament not active' });
   }
   
-  const { telegram_id, score, level, coins_earned } = req.body;
+  const { telegram_id, score, level, coins_earned, session_id } = req.body;
   if (!telegram_id || score == null) {
     return res.status(400).json({ error: 'telegram_id and score required' });
+  }
+  
+  // Anti-cheat: hard cap + session check
+  if (score > SCORE_LIMITS.MAX_ABSOLUTE_SCORE) {
+    console.log(`🚫 Tournament score REJECTED [${telegram_id}]: score=${score} exceeds cap`);
+    return res.status(403).json({ error: 'Score rejected' });
+  }
+  const session = gameSessions.get(session_id);
+  if (session && session.telegramId !== telegram_id) {
+    return res.status(403).json({ error: 'Invalid session' });
   }
   
   db.submitTournamentScore(req.params.id, telegram_id, score, level || 1, coins_earned || 0);
@@ -553,6 +670,40 @@ app.post('/api/archive-now', authMiddleware, (req, res) => {
   const result = db.archiveWeek();
   if (!result) return res.json({ ok: false, message: 'No scores to archive' });
   res.json({ ok: true, ...result });
+});
+
+// POST /api/admin/remove-scores — Remove a player's scores (requires API_SECRET)
+app.post('/api/admin/remove-scores', authMiddleware, (req, res) => {
+  const { telegram_id, week_only } = req.body;
+  if (!telegram_id) return res.status(400).json({ error: 'telegram_id required' });
+  
+  try {
+    if (week_only) {
+      const week = db.getWeekStart();
+      db.removePlayerWeekScores(telegram_id, week);
+      console.log(`🗑  Removed weekly scores for ${telegram_id} (week: ${week})`);
+    } else {
+      db.removeAllPlayerScores(telegram_id);
+      console.log(`🗑  Removed ALL scores for ${telegram_id}`);
+    }
+    res.json({ ok: true });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/admin/remove-tournament-scores — Remove from tournament
+app.post('/api/admin/remove-tournament-scores', authMiddleware, (req, res) => {
+  const { telegram_id, tournament_id } = req.body;
+  if (!telegram_id || !tournament_id) return res.status(400).json({ error: 'telegram_id and tournament_id required' });
+  
+  try {
+    db.removeTournamentScores(telegram_id, tournament_id);
+    console.log(`🗑  Removed tournament scores for ${telegram_id} from ${tournament_id}`);
+    res.json({ ok: true });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Health check
