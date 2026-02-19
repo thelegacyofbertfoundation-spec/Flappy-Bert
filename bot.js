@@ -286,6 +286,34 @@ bot.onText(/\/help/, (msg) => {
   ].join('\n'), { parse_mode: 'Markdown' });
 });
 
+// ── Admin: /ban <telegram_id> — Remove cheater from all leaderboards ─
+const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(Number).filter(Boolean);
+
+bot.onText(/\/ban(?:\s+(\d+))?/, (msg, match) => {
+  if (!ADMIN_IDS.includes(msg.from.id)) return; // silently ignore non-admins
+  
+  const targetId = match[1] ? parseInt(match[1]) : null;
+  if (!targetId) {
+    bot.sendMessage(msg.chat.id, '⚠️ Usage: /ban <telegram_id>');
+    return;
+  }
+  
+  try {
+    db.removeAllPlayerScores(targetId);
+    // Remove from all tournaments
+    const tournaments = db.getAllTournaments();
+    tournaments.forEach(t => db.removeTournamentScores(targetId, t.id));
+    
+    const player = db.getPlayer(targetId);
+    const name = player ? player.first_name : 'Unknown';
+    
+    bot.sendMessage(msg.chat.id, `🚫 Banned *${name}* (${targetId})\n\nRemoved from weekly leaderboard and all tournaments.`, { parse_mode: 'Markdown' });
+    console.log(`🚫 Admin ${msg.from.id} banned player ${targetId}`);
+  } catch(err) {
+    bot.sendMessage(msg.chat.id, '❌ Error: ' + err.message);
+  }
+});
+
 // ── /history — Send past leaderboard CSVs ────────────────────────────
 bot.onText(/\/history/, async (msg) => {
   const archives = db.getArchiveList();
