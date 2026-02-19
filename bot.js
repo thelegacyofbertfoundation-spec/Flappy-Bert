@@ -290,7 +290,7 @@ bot.onText(/\/help/, (msg) => {
 const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(Number).filter(Boolean);
 
 bot.onText(/\/ban(?:\s+(\d+))?/, (msg, match) => {
-  if (!ADMIN_IDS.includes(msg.from.id)) return; // silently ignore non-admins
+  if (!ADMIN_IDS.includes(msg.from.id)) return;
   
   const targetId = match[1] ? parseInt(match[1]) : null;
   if (!targetId) {
@@ -299,16 +299,38 @@ bot.onText(/\/ban(?:\s+(\d+))?/, (msg, match) => {
   }
   
   try {
+    // Permanently ban — blocks all future score submissions
+    db.banPlayer(targetId, 'banned by admin');
+    
+    // Remove all existing scores
     db.removeAllPlayerScores(targetId);
-    // Remove from all tournaments
     const tournaments = db.getAllTournaments();
     tournaments.forEach(t => db.removeTournamentScores(targetId, t.id));
     
     const player = db.getPlayer(targetId);
     const name = player ? player.first_name : 'Unknown';
     
-    bot.sendMessage(msg.chat.id, `🚫 Banned *${name}* (${targetId})\n\nRemoved from weekly leaderboard and all tournaments.`, { parse_mode: 'Markdown' });
+    bot.sendMessage(msg.chat.id, `🚫 Permanently banned *${name}* (${targetId})\n\nAll scores removed. Future submissions blocked.`, { parse_mode: 'Markdown' });
     console.log(`🚫 Admin ${msg.from.id} banned player ${targetId}`);
+  } catch(err) {
+    bot.sendMessage(msg.chat.id, '❌ Error: ' + err.message);
+  }
+});
+
+bot.onText(/\/unban(?:\s+(\d+))?/, (msg, match) => {
+  if (!ADMIN_IDS.includes(msg.from.id)) return;
+  
+  const targetId = match[1] ? parseInt(match[1]) : null;
+  if (!targetId) {
+    bot.sendMessage(msg.chat.id, '⚠️ Usage: /unban <telegram_id>');
+    return;
+  }
+  
+  try {
+    db.unbanPlayer(targetId);
+    const player = db.getPlayer(targetId);
+    const name = player ? player.first_name : 'Unknown';
+    bot.sendMessage(msg.chat.id, `✅ Unbanned *${name}* (${targetId})`, { parse_mode: 'Markdown' });
   } catch(err) {
     bot.sendMessage(msg.chat.id, '❌ Error: ' + err.message);
   }
@@ -490,6 +512,11 @@ app.post('/api/score', (req, res) => {
       return res.status(400).json({ error: 'telegram_id and score are required' });
     }
 
+    // Check if player is banned
+    if (db.isBanned(telegram_id)) {
+      return res.status(403).json({ error: 'Player is banned' });
+    }
+
     // Validate with anti-cheat
     const session = gameSessions.get(session_id);
     
@@ -669,6 +696,10 @@ app.post('/api/tournament/:id/score', (req, res) => {
   const { telegram_id, score, level, coins_earned, session_id } = req.body;
   if (!telegram_id || score == null) {
     return res.status(400).json({ error: 'telegram_id and score required' });
+  }
+  
+  if (db.isBanned(telegram_id)) {
+    return res.status(403).json({ error: 'Player is banned' });
   }
   
   // Anti-cheat: hard cap + session check
