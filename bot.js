@@ -39,16 +39,14 @@ const API_SECRET = process.env.API_SECRET || '';
 // ── Anti-cheat: game sessions ────────────────────────────────────────
 const gameSessions = new Map(); // sessionId -> { telegramId, startedAt, used }
 const SCORE_LIMITS = {
-  MAX_SCORE_PER_SECOND: 1.2,    // ~1 pipe per 0.8s at max speed is generous
-  MAX_ABSOLUTE_SCORE: 500,       // hard cap — anything above is suspicious
-  MIN_GAME_DURATION_MS: 3000,    // must play at least 3 seconds
-  MAX_LEVEL_FOR_SCORE: (s) => Math.floor(s / 10) + 2, // level can't exceed this for given score
-  MAX_COINS_FOR_SCORE: (s, mult) => Math.ceil(s * (mult || 2)) + 100, // generous coin cap
+  MAX_SCORE_PER_SECOND: 2.5,    // generous — accounts for 2x multiplier
+  MAX_ABSOLUTE_SCORE: 500,       // hard cap — anything above is cheating
+  MIN_GAME_DURATION_MS: 2000,    // must play at least 2 seconds
 };
 
 // Clean up old sessions every 5 minutes
 setInterval(() => {
-  const cutoff = Date.now() - 30 * 60 * 1000; // 30 min old
+  const cutoff = Date.now() - 30 * 60 * 1000;
   for (const [id, sess] of gameSessions) {
     if (sess.startedAt < cutoff) gameSessions.delete(id);
   }
@@ -59,52 +57,46 @@ function generateSessionId() {
 }
 
 function validateScore(session, body) {
-  const { score, level, coins_earned, frames, duration } = body;
+  const { score, level } = body;
   const issues = [];
   
-  // 1. Session must exist and be unused
-  if (!session) return { valid: false, reason: 'invalid_session' };
-  if (session.used) return { valid: false, reason: 'session_reused' };
-  
-  // 2. Time-based validation — must play at least 3 seconds
-  const elapsed = Date.now() - session.startedAt;
-  if (elapsed < SCORE_LIMITS.MIN_GAME_DURATION_MS) {
-    issues.push('too_fast');
-  }
-  
-  // 3. Score plausibility — score vs time played
-  const maxScoreForTime = Math.ceil((elapsed / 1000) * SCORE_LIMITS.MAX_SCORE_PER_SECOND);
-  if (score > maxScoreForTime) {
-    issues.push('score_exceeds_time');
-  }
-  
-  // 4. Hard score cap
+  // 1. Hard score cap — only true hard reject
   if (score > SCORE_LIMITS.MAX_ABSOLUTE_SCORE) {
-    issues.push('exceeds_cap');
+    console.log(`🚫 Score REJECTED: score=${score} exceeds hard cap`);
+    return { valid: false, reason: 'exceeds_cap' };
   }
   
-  // 5. Level consistency
-  if (level > SCORE_LIMITS.MAX_LEVEL_FOR_SCORE(score)) {
-    issues.push('level_mismatch');
-  }
-  
-  // 6. Frame count sanity — game runs at ~60fps
-  if (frames && duration) {
-    const expectedFrames = (duration / 1000) * 60;
-    if (frames < expectedFrames * 0.3 || frames > expectedFrames * 2) {
-      issues.push('frame_mismatch');
+  // 2. Session checks — log but allow if missing (network can fail)
+  if (!session) {
+    issues.push('no_session');
+  } else {
+    if (session.used) {
+      issues.push('session_reused');
+    }
+    
+    // Time-based checks only if we have a session
+    const elapsed = Date.now() - session.startedAt;
+    if (elapsed < SCORE_LIMITS.MIN_GAME_DURATION_MS && score > 5) {
+      issues.push('too_fast');
+    }
+    
+    const maxScoreForTime = Math.ceil((elapsed / 1000) * SCORE_LIMITS.MAX_SCORE_PER_SECOND);
+    if (score > maxScoreForTime && score > 10) {
+      issues.push('score_exceeds_time');
     }
   }
   
-  // Hard fails = rejected, soft issues = logged but allowed
-  const hardFails = ['invalid_session', 'session_reused', 'exceeds_cap', 'score_exceeds_time', 'too_fast'];
-  const isHardFail = issues.some(i => hardFails.includes(i));
-  
   if (issues.length > 0) {
-    console.log(`⚠️  Score validation [${session.telegramId}]: score=${score} issues=[${issues.join(',')}] elapsed=${elapsed}ms ${isHardFail ? 'REJECTED' : 'FLAGGED'}`);
+    const tid = session ? session.telegramId : 'unknown';
+    console.log(`⚠️  Score flagged [${tid}]: score=${score} issues=[${issues.join(',')}]`);
   }
   
-  return { valid: !isHardFail, issues, flagged: issues.length > 0 };
+  // Only reject on session_reused + high score (replay attack)
+  if (issues.includes('session_reused') && score > 20) {
+    return { valid: false, reason: 'session_reused' };
+  }
+  
+  return { valid: true, issues, flagged: issues.length > 0 };
 }
 
 if (!BOT_TOKEN) {
