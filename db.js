@@ -262,6 +262,10 @@ function removeTournamentScores(telegramId, tournamentId) {
     .run(telegramId, tournamentId);
 }
 
+function resetTournamentScores(tournamentId) {
+  db.prepare('DELETE FROM tournament_scores WHERE tournament_id = ?').run(tournamentId);
+}
+
 function banPlayer(telegramId, reason) {
   db.prepare('INSERT OR REPLACE INTO banned_players (telegram_id, reason) VALUES (?, ?)')
     .run(telegramId, reason || 'cheating');
@@ -359,6 +363,7 @@ module.exports = {
   removePlayerWeekScores,
   removeAllPlayerScores,
   removeTournamentScores,
+  resetTournamentScores,
   banPlayer,
   unbanPlayer,
   isBanned,

@@ -440,6 +440,16 @@ html, body {
   </div>
 </div>
 
+<!-- Landscape Warning -->
+<div id="landscapeWarning" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;background:rgba(0,0,0,0.95);justify-content:center;align-items:center;flex-direction:column;text-align:center;padding:20px">
+  <div style="font-size:48px;margin-bottom:16px">📱</div>
+  <div style="font-size:16px;color:#ffd700;font-weight:bold;margin-bottom:8px">ROTATE YOUR DEVICE</div>
+  <div style="font-size:10px;color:#7a7e9a">Flappy Bert is best played in portrait mode</div>
+</div>
+
+<!-- Letterbox background for landscape/desktop -->
+<div id="letterboxBg" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#030508;z-index:-1"></div>
+
 <!-- Tournament Leaderboard -->
 <div class="overlay" id="tournamentOverlay">
   <div class="shop-panel" style="border-color:#ffd700">
@@ -693,13 +703,51 @@ function init() {
 
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
-  G.width = window.innerWidth;
-  G.height = window.innerHeight;
-  G.canvas.width = G.width * dpr;
-  G.canvas.height = G.height * dpr;
+  let w = window.innerWidth;
+  let h = window.innerHeight;
+  
+  // Force portrait aspect ratio — max 9:16 width
+  const maxAspect = 0.6;
+  if (w / h > maxAspect) {
+    w = Math.floor(h * maxAspect);
+  }
+  
+  // Clamp to phone-sized play area — prevents tall/tiny window exploits
+  const MIN_W = 280, MAX_W = 480;
+  const MIN_H = 500, MAX_H = 920;
+  w = Math.max(MIN_W, Math.min(MAX_W, w));
+  h = Math.max(MIN_H, Math.min(MAX_H, h));
+  
+  // Re-check aspect after clamping
+  if (w / h > maxAspect) {
+    w = Math.floor(h * maxAspect);
+  }
+  
+  G.width = w;
+  G.height = h;
+  G.canvas.width = w * dpr;
+  G.canvas.height = h * dpr;
+  G.canvas.style.width = w + 'px';
+  G.canvas.style.height = h + 'px';
+  // Center canvas in viewport
+  G.canvas.style.position = 'absolute';
+  G.canvas.style.left = ((window.innerWidth - w) / 2) + 'px';
+  G.canvas.style.top = ((window.innerHeight - h) / 2) + 'px';
   G.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  G.bertSize = Math.min(40, G.width * 0.1);
-  G.groundHeight = Math.max(50, Math.min(70, G.height * 0.1));
+  G.bertSize = Math.min(40, w * 0.1);
+  G.groundHeight = Math.max(50, Math.min(70, h * 0.1));
+  
+  // Show/hide landscape warning
+  const isLandscape = window.innerWidth > window.innerHeight * 1.2;
+  const warn = document.getElementById('landscapeWarning');
+  if (warn) {
+    warn.style.display = isLandscape ? 'flex' : 'none';
+    if (isLandscape && G.state === 'playing' && !G.paused) {
+      G.paused = true;
+      G.state = 'paused';
+      showOverlay('pauseOverlay');
+    }
+  }
 }
 
 function generateStars() {
@@ -1314,6 +1362,116 @@ function updateLeaderboard(name, score) {
 }
 
 // ========== RENDERING ==========
+// ========== ANTI-TAMPER ==========
+// Protects critical game variables from console modification
+(function() {
+  // Expected values based on game state
+  const EXPECTED = {
+    gravity: 0.25,
+    flapForce: -4.8,
+    baseSpeed: 2.5,
+    basePipeGap: 190,
+    pipeWidth: 52,
+  };
+  
+  // Lock immutable properties
+  Object.defineProperty(G, 'gravity', {
+    get() { return EXPECTED.gravity; },
+    set() { /* ignore console overrides */ },
+    configurable: false,
+  });
+  
+  Object.defineProperty(G, 'flapForce', {
+    get() { return EXPECTED.flapForce; },
+    set() { /* ignore console overrides */ },
+    configurable: false,
+  });
+  
+  Object.defineProperty(G, 'baseSpeed', {
+    get() { return EXPECTED.baseSpeed; },
+    set() { /* ignore */ },
+    configurable: false,
+  });
+  
+  Object.defineProperty(G, 'basePipeGap', {
+    get() { return EXPECTED.basePipeGap; },
+    set() { /* ignore */ },
+    configurable: false,
+  });
+  
+  Object.defineProperty(G, 'pipeWidth', {
+    get() { return EXPECTED.pipeWidth; },
+    set() { /* ignore */ },
+    configurable: false,
+  });
+  
+  // Protect scoreMultiplier — only allow 1, 1.5, 2
+  let _scoreMultiplier = G.scoreMultiplier;
+  Object.defineProperty(G, 'scoreMultiplier', {
+    get() { return _scoreMultiplier; },
+    set(v) {
+      if (v === 1 || v === 1.5 || v === 2) _scoreMultiplier = v;
+    },
+    configurable: false,
+  });
+  
+  // Speed & gap: allow legitimate writes from updateDifficulty() only
+  let _gameSpeed = G.gameSpeed;
+  let _pipeGap = G.pipeGap;
+  let _score = G.score;
+  
+  function expectedSpeed() {
+    const lvl = Math.floor(_score / 10) + 1;
+    return EXPECTED.baseSpeed + Math.min(lvl * 0.15, 3);
+  }
+  function expectedGap() {
+    const lvl = Math.floor(_score / 10) + 1;
+    return Math.max(EXPECTED.basePipeGap - lvl * 4, 110);
+  }
+  
+  Object.defineProperty(G, 'gameSpeed', {
+    get() { return _gameSpeed; },
+    set(v) {
+      // Only allow values consistent with current level
+      const exp = expectedSpeed();
+      if (v >= EXPECTED.baseSpeed - 0.1 && v <= exp + 0.5) {
+        _gameSpeed = v;
+      }
+      // Silently reject out-of-range values (console cheats)
+    },
+    configurable: false,
+  });
+  
+  Object.defineProperty(G, 'pipeGap', {
+    get() { return _pipeGap; },
+    set(v) {
+      const exp = expectedGap();
+      if (v >= exp - 10 && v <= EXPECTED.basePipeGap + 10) {
+        _pipeGap = v;
+      }
+    },
+    configurable: false,
+  });
+  
+  Object.defineProperty(G, 'score', {
+    get() { return _score; },
+    set(v) {
+      // Score can only increase by 1 or 2 (multiplier) at a time during play
+      if (G.state === 'playing') {
+        const maxIncrease = G.scoreMultiplier >= 2 ? 2 : (G.scoreMultiplier >= 1.5 ? 2 : 1);
+        if (v <= _score + maxIncrease && v >= _score) {
+          _score = v;
+        }
+        // Reject jumps > allowed increase (console G.score = 999)
+      } else {
+        // Allow resets (startGame sets to 0)
+        if (v === 0) _score = v;
+      }
+    },
+    configurable: false,
+  });
+})();
+
 function gameLoop(ts) {
   update();
   render();

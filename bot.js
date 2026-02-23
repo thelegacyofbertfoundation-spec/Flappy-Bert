@@ -328,6 +328,18 @@ bot.onText(/\/unban(?:\s+(\d+))?/, (msg, match) => {
   }
 });
 
+bot.onText(/\/resettournament/, (msg) => {
+  if (!ADMIN_IDS.includes(msg.from.id)) return;
+  
+  try {
+    db.resetTournamentScores('champions-flapoff-1');
+    bot.sendMessage(msg.chat.id, '🗑 All tournament scores wiped. Tournament continues with a clean leaderboard.', { parse_mode: 'Markdown' });
+    console.log(`🗑 Admin ${msg.from.id} reset tournament scores`);
+  } catch(err) {
+    bot.sendMessage(msg.chat.id, '❌ Error: ' + err.message);
+  }
+});
+
 // ── /history — Send past leaderboard CSVs ────────────────────────────
 bot.onText(/\/history/, async (msg) => {
   const archives = db.getArchiveList();
