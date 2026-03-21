@@ -1,7 +1,7 @@
 # Flappy Bert — Phase 1 Engagement Improvements
 
 **Date:** 2026-03-20
-**Status:** Design approved, pending implementation
+**Status:** Implemented
 **Scope:** Gameplay addictiveness, ad monetisation, progression hooks
 
 ## Overview
