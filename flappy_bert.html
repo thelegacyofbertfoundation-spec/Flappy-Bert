@@ -1389,6 +1389,12 @@ function gameOver() {
   document.getElementById('comboDisplay').style.display = 'none';
 }
 
+function finalGameOver() {
+  showGameOverScreen();
+  submitScoreToServer(G.score, G.level, G.coinsEarned);
+  submitTournamentScore(G.score, G.level, G.coinsEarned);
+}
+
 function showGameOverScreen() {
   G.state = 'gameover';
 
@@ -1758,7 +1764,7 @@ function update() {
     // Show score screen after death animation
     const deathDuration = (G.adInterstitialCounter > 0 && (G.adInterstitialCounter + 1) % 4 === 0 && AdSystem.isInterstitialReady()) ? 90 : 50;
     if (G.deathTimer >= deathDuration) {
-      showGameOverScreen();
+      finalGameOver();
     }
     return;
   }
@@ -2095,7 +2101,7 @@ function render() {
   }
   
   // Clouds (slow drifting)
-  const cloudOffset = (G.state === 'playing' || G.state === 'dying') ? G.frameCount * 0.15 : G.frameCount * 0.05;
+  const cloudOffset = (G.state === 'playing' || G.state === 'dying' || G.state === 'continuing') ? G.frameCount * 0.15 : G.frameCount * 0.05;
   ctx.fillStyle = 'rgba(150,170,220,0.04)';
   for (let i = 0; i < 5; i++) {
     const cx = ((i * 200 + 80) - cloudOffset * (0.3 + i * 0.1)) % (w + 200) - 60;
@@ -2115,7 +2121,7 @@ function render() {
   // Background buildings/mountains
   drawBackground(ctx, w, h);
   
-  if (G.state === 'playing' || G.state === 'gameover' || G.state === 'dying' || G.state === 'ready' || G.state === 'paused') {
+  if (G.state === 'playing' || G.state === 'gameover' || G.state === 'dying' || G.state === 'ready' || G.state === 'paused' || G.state === 'continuing') {
     // Pipes
     for (const p of G.pipes) {
       drawPipe(ctx, p);
