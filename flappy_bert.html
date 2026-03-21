@@ -2018,7 +2018,7 @@ function update() {
       vx: -baseSpeed,
       baseY: 0,
       age: 0,
-      size: type === 'spark' ? 6 : 10,
+      size: type === 'bat' ? 14 : type === 'spark' ? 6 : 10,
       amplitude: type === 'ghost' ? 30 + Math.random() * 20 : 15 + Math.random() * 10,
       freq: type === 'ghost' ? 0.015 : 0.04 + Math.random() * 0.02,
     });
@@ -2277,26 +2277,14 @@ function render() {
       const flicker = 0.5 + Math.sin(e.age * 0.15) * 0.15;
       ctx.globalAlpha = flicker;
       if (e.type === 'bat') {
-        // Small dark bat — two flapping wings
-        const wingAngle = Math.sin(e.age * 0.3) * 0.6;
-        ctx.fillStyle = '#3a2255';
+        // JEETS text enemy
         ctx.translate(e.x, e.y);
-        // Body
-        ctx.beginPath();
-        ctx.ellipse(0, 0, 5, 3, 0, 0, Math.PI * 2);
-        ctx.fill();
-        // Left wing
-        ctx.beginPath();
-        ctx.ellipse(-7, -2 + wingAngle * 4, 6, 2, -0.3 + wingAngle, 0, Math.PI * 2);
-        ctx.fill();
-        // Right wing
-        ctx.beginPath();
-        ctx.ellipse(7, -2 + wingAngle * 4, 6, 2, 0.3 - wingAngle, 0, Math.PI * 2);
-        ctx.fill();
-        // Eyes
-        ctx.fillStyle = '#ff3860';
-        ctx.beginPath(); ctx.arc(-2, -1, 1, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(2, -1, 1, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 0.7 + Math.sin(e.age * 0.1) * 0.15;
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 14px "Press Start 2P", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('JEETS', 0, 0);
       } else if (e.type === 'ghost') {
         // Translucent ghost — floats in wide waves
         ctx.globalAlpha = 0.25 + Math.sin(e.age * 0.05) * 0.1;
