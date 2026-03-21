@@ -57,15 +57,15 @@ function generateSessionId() {
 }
 
 function validateScore(session, body) {
-  const { score, level } = body;
+  const { score, level, shieldUsed, adContinueUsed } = body;
   const issues = [];
-  
+
   // 1. Hard score cap — only true hard reject
   if (score > SCORE_LIMITS.MAX_ABSOLUTE_SCORE) {
     console.log(`🚫 Score REJECTED: score=${score} exceeds hard cap`);
     return { valid: false, reason: 'exceeds_cap' };
   }
-  
+
   // 2. Session checks — log but allow if missing (network can fail)
   if (!session) {
     issues.push('no_session');
@@ -73,29 +73,39 @@ function validateScore(session, body) {
     if (session.used) {
       issues.push('session_reused');
     }
-    
+
     // Time-based checks only if we have a session
     const elapsed = Date.now() - session.startedAt;
     if (elapsed < SCORE_LIMITS.MIN_GAME_DURATION_MS && score > 5) {
       issues.push('too_fast');
     }
-    
-    const maxScoreForTime = Math.ceil((elapsed / 1000) * SCORE_LIMITS.MAX_SCORE_PER_SECOND);
+
+    // Relax time-based threshold when shield/ad continue used
+    let maxScorePerSecond = SCORE_LIMITS.MAX_SCORE_PER_SECOND;
+    if (shieldUsed && adContinueUsed) {
+      maxScorePerSecond *= 1.5;  // 50% relaxation for both
+    } else if (shieldUsed) {
+      maxScorePerSecond *= 1.2;  // 20% relaxation for shield
+    } else if (adContinueUsed) {
+      maxScorePerSecond *= 1.2;  // 20% relaxation for ad continue
+    }
+
+    const maxScoreForTime = Math.ceil((elapsed / 1000) * maxScorePerSecond);
     if (score > maxScoreForTime && score > 10) {
       issues.push('score_exceeds_time');
     }
   }
-  
+
   if (issues.length > 0) {
     const tid = session ? session.telegramId : 'unknown';
     console.log(`⚠️  Score flagged [${tid}]: score=${score} issues=[${issues.join(',')}]`);
   }
-  
+
   // Only reject on session_reused + high score (replay attack)
   if (issues.includes('session_reused') && score > 20) {
     return { valid: false, reason: 'session_reused' };
   }
-  
+
   return { valid: true, issues, flagged: issues.length > 0 };
 }
 
@@ -510,7 +520,12 @@ app.post('/api/session', (req, res) => {
 // Body: { telegram_id, first_name, username?, score, level, coins_earned, session_id, frames, duration, signature }
 app.post('/api/score', (req, res) => {
   try {
-    const { telegram_id, first_name, username, score, level, coins_earned, session_id, frames, duration, signature } = req.body;
+    const {
+      telegram_id, first_name, username,
+      score, level, coins_earned,
+      session_id, frames, duration, signature,
+      badges, shieldUsed, adContinueUsed
+    } = req.body;
 
     if (!telegram_id || score == null) {
       return res.status(400).json({ error: 'telegram_id and score are required' });
@@ -523,25 +538,30 @@ app.post('/api/score', (req, res) => {
 
     // Validate with anti-cheat
     const session = gameSessions.get(session_id);
-    
+
     // Check session belongs to this user
     if (session && session.telegramId !== telegram_id) {
       console.log(`⚠️  Session hijack attempt: session=${session_id} owner=${session.telegramId} submitter=${telegram_id}`);
       return res.status(403).json({ error: 'Invalid session' });
     }
-    
-    const validation = validateScore(session, { score, level, coins_earned, frames, duration, signature });
-    
+
+    const validation = validateScore(session, { score, level, coins_earned, frames, duration, signature, shieldUsed, adContinueUsed });
+
     if (!validation.valid) {
       console.log(`🚫 Score REJECTED [${telegram_id}]: score=${score} reason=${validation.reason || validation.issues.join(',')}`);
       return res.status(403).json({ error: 'Score rejected', reason: validation.reason });
     }
-    
+
     // Mark session as used
     if (session) session.used = true;
 
     db.upsertPlayer(telegram_id, first_name || 'Player', username || null);
     db.submitScore(telegram_id, score, level || 1, coins_earned || 0);
+
+    // Store badges if provided
+    if (badges && Array.isArray(badges)) {
+      db.updatePlayerBadges(telegram_id, badges);
+    }
 
     const rank = db.getPlayerRank(telegram_id);
 
