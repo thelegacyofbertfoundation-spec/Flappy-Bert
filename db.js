@@ -75,6 +75,9 @@ function init() {
       ON tournament_scores(tournament_id, score DESC);
   `);
 
+  // Phase 1: badges column
+  try { db.exec("ALTER TABLE players ADD COLUMN badges TEXT DEFAULT '[]'"); } catch(e) {}
+
   return db;
 }
 
@@ -149,6 +152,7 @@ function getWeeklyLeaderboard(limit = 20) {
       p.first_name,
       p.username,
       p.skin,
+      p.badges,
       MAX(s.score) AS best_score,
       COUNT(s.id)  AS games_played,
       MAX(s.level) AS max_level
@@ -279,6 +283,11 @@ function isBanned(telegramId) {
   return !!db.prepare('SELECT 1 FROM banned_players WHERE telegram_id = ?').get(telegramId);
 }
 
+function updatePlayerBadges(telegramId, badges) {
+  db.prepare('UPDATE players SET badges = ? WHERE telegram_id = ?')
+    .run(JSON.stringify(badges), telegramId);
+}
+
 // ── Weekly CSV Archive ────────────────────────────────────────────────
 
 function archiveWeek(weekStart) {
@@ -367,6 +376,7 @@ module.exports = {
   banPlayer,
   unbanPlayer,
   isBanned,
+  updatePlayerBadges,
   archiveWeek,
   getArchiveList,
   getArchivePath,
