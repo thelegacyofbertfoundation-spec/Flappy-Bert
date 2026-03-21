@@ -2018,7 +2018,7 @@ function update() {
       vx: -baseSpeed,
       baseY: 0,
       age: 0,
-      size: type === 'bat' ? 14 : type === 'spark' ? 6 : 10,
+      size: 14,
       amplitude: type === 'ghost' ? 30 + Math.random() * 20 : 15 + Math.random() * 10,
       freq: type === 'ghost' ? 0.015 : 0.04 + Math.random() * 0.02,
     });
@@ -2276,49 +2276,14 @@ function render() {
       ctx.save();
       const flicker = 0.5 + Math.sin(e.age * 0.15) * 0.15;
       ctx.globalAlpha = flicker;
-      if (e.type === 'bat') {
-        // JEETS text enemy
-        ctx.translate(e.x, e.y);
-        ctx.globalAlpha = 0.7 + Math.sin(e.age * 0.1) * 0.15;
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 14px "Press Start 2P", monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('JEETS', 0, 0);
-      } else if (e.type === 'ghost') {
-        // Translucent ghost — floats in wide waves
-        ctx.globalAlpha = 0.25 + Math.sin(e.age * 0.05) * 0.1;
-        ctx.fillStyle = '#8888cc';
-        ctx.translate(e.x, e.y);
-        ctx.beginPath();
-        ctx.arc(0, -3, 7, Math.PI, 0);
-        ctx.lineTo(7, 6);
-        // Wavy bottom
-        for (let wx = 7; wx >= -7; wx -= 3.5) {
-          ctx.lineTo(wx, 6 + (wx % 7 === 0 ? -3 : 0));
-        }
-        ctx.closePath();
-        ctx.fill();
-        // Eyes
-        ctx.fillStyle = '#fff';
-        ctx.beginPath(); ctx.arc(-3, -3, 2, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(3, -3, 2, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = '#222';
-        ctx.beginPath(); ctx.arc(-3, -2, 1, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(3, -2, 1, 0, Math.PI * 2); ctx.fill();
-      } else {
-        // Spark — tiny glowing orb
-        ctx.translate(e.x, e.y);
-        const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 8);
-        glow.addColorStop(0, 'rgba(255,56,96,0.6)');
-        glow.addColorStop(1, 'rgba(255,56,96,0)');
-        ctx.fillStyle = glow;
-        ctx.fillRect(-8, -8, 16, 16);
-        ctx.fillStyle = '#ff3860';
-        ctx.beginPath();
-        ctx.arc(0, 0, 3, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      // All enemies render as JEETS text
+      ctx.translate(e.x, e.y);
+      ctx.globalAlpha = 0.7 + Math.sin(e.age * 0.1) * 0.15;
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 14px "Press Start 2P", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('JEETS', 0, 0);
       ctx.restore();
     }
 
