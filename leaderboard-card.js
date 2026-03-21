@@ -34,6 +34,44 @@ const SKIN_COLOURS = {
   cosmic:  '#ff88ff',
 };
 
+// ── Badge metadata (mirrors client BADGES) ─────────────────────────
+const BADGE_META = {
+  rookie:         { abbr: 'RK', color: '#cd7f32' },
+  pipe_dodger:    { abbr: 'PD', color: '#c0c0c0' },
+  sky_king:       { abbr: 'SK', color: '#ffd700' },
+  legend:         { abbr: 'LG', color: '#ff6b35' },
+  immortal:       { abbr: 'IM', color: '#ff3860' },
+  streak_master:  { abbr: 'SM', color: '#44d62c' },
+  combo_king:     { abbr: 'CK', color: '#ffb800' },
+  close_call:     { abbr: 'CC', color: '#00e5ff' },
+  shield_breaker: { abbr: 'SB', color: '#8844ff' },
+};
+
+// Badge priority order (highest tier first)
+const BADGE_PRIORITY = ['immortal', 'legend', 'sky_king', 'pipe_dodger', 'rookie', 'combo_king', 'close_call', 'streak_master', 'shield_breaker'];
+
+function getHighestBadge(badgesJson) {
+  try {
+    const badges = typeof badgesJson === 'string' ? JSON.parse(badgesJson) : (badgesJson || []);
+    for (const id of BADGE_PRIORITY) {
+      if (badges.includes(id)) return BADGE_META[id];
+    }
+  } catch(e) {}
+  return null;
+}
+
+function drawBadge(ctx, cx, cy, r, meta) {
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = meta.color;
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${r}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(meta.abbr, cx, cy + 1);
+}
+
 // ── Layout constants ────────────────────────────────────────────────
 const WIDTH        = 800;
 const HEADER_H     = 130;
@@ -218,6 +256,13 @@ function renderLeaderboardCard(entries, options = {}) {
     if (displayName.length > 18) displayName = displayName.slice(0, 17) + '…';
     if (isHighlighted) displayName = '▶ ' + displayName;
     ctx.fillText(displayName, PAD + 86, rowCenterY);
+
+    // Badge next to name
+    const badgeMeta = getHighestBadge(entry.badges);
+    if (badgeMeta) {
+      const nameWidth = ctx.measureText(displayName).width;
+      drawBadge(ctx, PAD + 86 + nameWidth + 14, rowCenterY, 8, badgeMeta);
+    }
 
     // ── Score ──
     ctx.textAlign = 'right';
@@ -422,6 +467,22 @@ function renderPlayerCard(playerData, statsData, rank, options = {}) {
   // Footer
   ctx.font = 'bold 10px sans-serif';
   ctx.fillStyle = 'rgba(255,107,53,0.4)';
+  // Badges row
+  if (playerData.badges) {
+    const badges = typeof playerData.badges === 'string' ? JSON.parse(playerData.badges) : (playerData.badges || []);
+    if (badges.length > 0) {
+      const badgeY = HEIGHT - 60;
+      let badgeX = 30;
+      for (const id of badges) {
+        const meta = BADGE_META[id];
+        if (meta) {
+          drawBadge(ctx, badgeX, badgeY, 10, meta);
+          badgeX += 28;
+        }
+      }
+    }
+  }
+
   ctx.textAlign = 'center';
   ctx.fillText('FLAPPY BERT  •  FLAP TO EARN', WIDTH / 2, HEIGHT - 22);
   ctx.font = '8px sans-serif';
