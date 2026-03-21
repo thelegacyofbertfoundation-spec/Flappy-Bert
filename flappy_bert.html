@@ -617,6 +617,18 @@ const G = {
   paused: false,
   // Tutorial
   hasPlayedBefore: false,
+  // Phase 1: Shield
+  hasShield: false,
+  shieldUsedThisGame: false,
+  shieldSpawnedThisGame: false,
+  invincibleFrames: 0,
+  // Phase 1: Badges
+  earnedBadges: [],
+  shieldsUsedTotal: 0,
+  nearMissesThisGame: 0,
+  // Phase 1: Ads
+  adContinueUsed: false,
+  adInterstitialCounter: 0,
 };
 
 // ========== SHOP ITEMS ==========
@@ -953,6 +965,9 @@ function loadData() {
     G.nearMissesToday = d.nearMissesToday || 0;
     G.bestComboToday = d.bestComboToday || 0;
     G.coinsEarnedToday = d.coinsEarnedToday || 0;
+    // Phase 1 persisted fields
+    G.earnedBadges = d.earnedBadges || [];
+    G.shieldsUsedTotal = d.shieldsUsedTotal || 0;
     // Check weekly reset
     const currentWeek = getWeekStart();
     if (currentWeek > G.weekStart) {
@@ -984,6 +999,8 @@ function saveData() {
       nearMissesToday: G.nearMissesToday,
       bestComboToday: G.bestComboToday,
       coinsEarnedToday: G.coinsEarnedToday,
+      earnedBadges: G.earnedBadges,
+      shieldsUsedTotal: G.shieldsUsedTotal,
     }));
   } catch(e) {}
 }
@@ -1040,6 +1057,13 @@ function startGame() {
   G.shakeFrames = 0;
   G.flashAlpha = 0;
   G.paused = false;
+  // Phase 1 transient resets
+  G.hasShield = false;
+  G.shieldUsedThisGame = false;
+  G.shieldSpawnedThisGame = false;
+  G.invincibleFrames = 0;
+  G.nearMissesThisGame = 0;
+  G.adContinueUsed = false;
   G.readyTimer = 0;
   G.readyBobFrame = 0;
   
