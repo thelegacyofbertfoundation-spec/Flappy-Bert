@@ -1522,6 +1522,51 @@ function showGameOverScreen() {
   showOverlay('gameOverOverlay');
 }
 
+function continueWithAd() {
+  AdSystem.showRewarded(function(completed) {
+    if (!completed) return;
+
+    G.adContinueUsed = true;
+
+    // Remove pipes near Bert
+    const clearRange = G.width * 2;
+    G.pipes = G.pipes.filter(p => Math.abs(p.x - G.bert.x) > clearRange);
+
+    // Reset Bert to center with zero velocity
+    G.bert.y = (G.height - G.groundHeight) / 2;
+    G.bert.vy = 0;
+    G.bert.rotation = 0;
+
+    // Grace period: no new pipes for 60 frames
+    G.pipeTimer = -60;
+
+    // Reset combo
+    G.combo = 0;
+
+    // Brief countdown then resume
+    G.state = 'continuing';
+    G.continueTimer = 30; // ~0.5s countdown
+
+    hideAllOverlays();
+  });
+}
+
+function doubleCoinsWithAd() {
+  AdSystem.showRewarded(function(completed) {
+    if (!completed) return;
+    const bonus = G.coinsEarned; // Double = add same amount again
+    G.coins += bonus;
+    G.coinsEarned += bonus;
+    updateCoinDisplay();
+    saveData();
+    // Hide the button after use
+    document.getElementById('goDoubleCoins').style.display = 'none';
+    // Update coins display on game over screen
+    document.getElementById('goCoins').innerHTML = '+' + G.coinsEarned + ' &#x1FA99;';
+    showToast('Coins doubled! +' + bonus);
+  });
+}
+
 function updateLeaderboard(name, score) {
   // Check weekly reset
   const currentWeek = getWeekStart();
@@ -1710,13 +1755,24 @@ function update() {
       if (p.life <= 0) G.particles.splice(i, 1);
     }
     
-    // Show score screen after 50 frames (~0.8s)
-    if (G.deathTimer >= 50) {
+    // Show score screen after death animation
+    const deathDuration = (G.adInterstitialCounter > 0 && (G.adInterstitialCounter + 1) % 4 === 0 && AdSystem.isInterstitialReady()) ? 90 : 50;
+    if (G.deathTimer >= deathDuration) {
       showGameOverScreen();
     }
     return;
   }
-  
+
+  if (G.state === 'continuing') {
+    G.continueTimer--;
+    if (G.continueTimer <= 0) {
+      G.state = 'playing';
+      G.invincibleFrames = 30; // Brief invincibility after continue
+      AudioSystem.startMusic();
+    }
+    return;
+  }
+
   // Paused — skip everything
   if (G.state === 'paused' || G.state !== 'playing') return;
   
@@ -2124,7 +2180,20 @@ function render() {
 
   // Ground
   drawGround(ctx, w, h);
-  
+
+  // Continue countdown overlay
+  if (G.state === 'continuing') {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 32px "Press Start 2P", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('GO!', w / 2, h / 2);
+    ctx.restore();
+  }
+
   // Particles
   for (const p of G.particles) {
     const alpha = p.life / p.maxLife;
@@ -3227,6 +3296,9 @@ async function submitScoreToServer(score, level, coinsEarned) {
         username: user.username, score, level, coins_earned: coinsEarned,
         session_id: _gameSession,
         frames, duration,
+        badges: G.earnedBadges,
+        shieldUsed: G.shieldUsedThisGame,
+        adContinueUsed: G.adContinueUsed,
       }),
     });
   } catch(e) {}
