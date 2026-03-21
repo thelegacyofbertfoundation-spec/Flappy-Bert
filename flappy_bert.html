@@ -709,7 +709,8 @@ function init() {
   
   // Init audio
   AudioSystem.init();
-  
+  AdSystem.init();
+
   requestAnimationFrame(gameLoop);
 }
 
@@ -934,6 +935,40 @@ const AudioSystem = {
   }
 };
 
+// ========== AD SYSTEM (STUB — replace with real SDK after spike) ==========
+const AdSystem = {
+  _sdkLoaded: false,
+  _rewardedReady: false,
+  _interstitialReady: false,
+
+  init() {
+    // Stub: real implementation loads ad SDK here
+    console.log('[AdSystem] init (stub — no SDK loaded)');
+  },
+
+  preload() {
+    // Stub: real implementation requests next ad in background
+  },
+
+  isRewardedReady() {
+    return this._rewardedReady;
+  },
+
+  isInterstitialReady() {
+    return this._interstitialReady;
+  },
+
+  showRewarded(callback) {
+    if (!this._rewardedReady) { if (callback) callback(false); return; }
+    if (callback) callback(false);
+  },
+
+  showInterstitial(callback) {
+    if (!this._interstitialReady) { if (callback) callback(); return; }
+    if (callback) callback();
+  },
+};
+
 // ========== DATA PERSISTENCE ==========
 function loadData() {
   try {
@@ -1106,6 +1141,7 @@ function startGame() {
   hint.textContent = G.hasPlayedBefore ? 'TAP TO START' : 'TAP & HOLD TO FLY HIGHER';
   
   AudioSystem.resume();
+  AdSystem.preload();
 }
 
 function onFlapStart() {
