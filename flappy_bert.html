@@ -1369,6 +1369,27 @@ function addPipe() {
     pipe.hasShield = true;  // ~5.6% effective chance shield
     G.shieldSpawnedThisGame = true;
   }
+
+  // 10% chance to spawn a JEETS enemy alongside this pipe (level 2+)
+  if (G.level >= 2 && Math.random() < 0.1) {
+    const playH = G.height - G.groundHeight;
+    const speed = G.gameSpeed;
+    const types = ['bat', 'ghost', 'spark'];
+    const type = types[Math.floor(Math.random() * types.length)];
+    const baseSpeed = speed * (0.6 + Math.random() * 0.8);
+    const y = 60 + Math.random() * (playH - 140);
+    G.enemies.push({
+      type,
+      x: G.width + 20,
+      y,
+      vx: -baseSpeed,
+      baseY: y,
+      age: 0,
+      size: 14,
+      amplitude: type === 'ghost' ? 30 + Math.random() * 20 : 15 + Math.random() * 10,
+      freq: type === 'ghost' ? 0.015 : 0.04 + Math.random() * 0.02,
+    });
+  }
 }
 
 function checkCollision() {
@@ -2003,28 +2024,7 @@ function update() {
     }
   }
 
-  // Enemies — spawn and update
-  G.enemyTimer++;
-  const enemyInterval = Math.max(300 - G.level * 15, 140);
-  if (G.enemyTimer >= enemyInterval && G.level >= 2) {
-    const playH = G.height - G.groundHeight;
-    const types = ['bat', 'ghost', 'spark'];
-    const type = types[Math.floor(Math.random() * types.length)];
-    const baseSpeed = speed * (0.6 + Math.random() * 0.8);
-    G.enemies.push({
-      type,
-      x: G.width + 20,
-      y: 60 + Math.random() * (playH - 140),
-      vx: -baseSpeed,
-      baseY: 0,
-      age: 0,
-      size: 14,
-      amplitude: type === 'ghost' ? 30 + Math.random() * 20 : 15 + Math.random() * 10,
-      freq: type === 'ghost' ? 0.015 : 0.04 + Math.random() * 0.02,
-    });
-    G.enemies[G.enemies.length - 1].baseY = G.enemies[G.enemies.length - 1].y;
-    G.enemyTimer = 0;
-  }
+  // Enemies — update only (spawning is triggered from addPipe)
 
   for (let i = G.enemies.length - 1; i >= 0; i--) {
     const e = G.enemies[i];
