@@ -1267,9 +1267,20 @@ function addPipe() {
     moveSpeed: moveSpeed,
     moveRange: 40,
     moveOffset: 0,
-    hasCoin: Math.random() < 0.3, // 30% chance of bonus coin
+    hasCoin: false,
+    hasShield: false,
     coinCollected: false,
+    shieldCollected: false,
   });
+
+  const pipe = G.pipes[G.pipes.length - 1];
+  const roll = Math.random();
+  if (roll < 0.3) {
+    pipe.hasCoin = true;  // 30% chance coin
+  } else if (roll < 0.3 + 0.7 * 0.08 && !G.hasShield && !G.shieldSpawnedThisGame) {
+    pipe.hasShield = true;  // ~5.6% effective chance shield
+    G.shieldSpawnedThisGame = true;
+  }
 }
 
 function checkCollision() {
@@ -1747,13 +1758,34 @@ function update() {
         });
       }
     }
-    
+
+    // Shield pickup
+    if (p.hasShield && !p.shieldCollected) {
+      const shieldX = p.x + G.pipeWidth / 2;
+      const shieldY = p.gapY + p.moveOffset + p.gapH / 2;
+      const dist = Math.hypot(G.bert.x - shieldX, G.bert.y - shieldY);
+      if (dist < 25) {
+        p.shieldCollected = true;
+        G.hasShield = true;
+        AudioSystem.playCoin();
+        G.particles.push({
+          x: shieldX, y: shieldY,
+          vx: 0, vy: -1.5,
+          life: 30, maxLife: 30,
+          text: 'SHIELD!',
+          color: '#00aaff',
+          size: 10,
+        });
+        try { navigator.vibrate && navigator.vibrate([20, 10, 20]); } catch(e) {}
+      }
+    }
+
     // Remove off-screen
     if (p.x < -G.pipeWidth - 10) {
       G.pipes.splice(i, 1);
     }
   }
-  
+
   // Ground scroll
   G.ground.offset = (G.ground.offset + speed) % 32;
   G.scrollDistance += speed;
@@ -1768,8 +1800,71 @@ function update() {
   }
   
   // Collision
-  if (checkCollision()) {
-    gameOver();
+  if (G.invincibleFrames > 0) {
+    G.invincibleFrames--;
+  } else if (checkCollision()) {
+    // Check if shield saves us (not ceiling hits)
+    const isCeiling = G.bert.y - G.bertSize * 0.35 < 0;
+    if (G.hasShield && !isCeiling) {
+      // Shield absorbs hit
+      G.hasShield = false;
+      G.shieldUsedThisGame = true;
+      G.shieldsUsedTotal++;
+      G.invincibleFrames = 30;
+      G.combo = 0; // Combo reset as penalty
+
+      // Bounce to center of nearest pipe gap
+      let bestGapY = (G.height - G.groundHeight) / 2;
+      let bestDist = Infinity;
+      for (const p of G.pipes) {
+        const gapCenter = p.gapY + p.moveOffset + p.gapH / 2;
+        const d = Math.abs(p.x - G.bert.x);
+        if (d < bestDist) {
+          bestDist = d;
+          bestGapY = gapCenter;
+        }
+      }
+      G.bert.y = bestGapY;
+      G.bert.vy = 0;
+
+      // Visual + haptic feedback
+      G.shakeFrames = 10;
+      G.shakeIntensity = 5;
+      G.flashAlpha = 0.4;
+      try { navigator.vibrate && navigator.vibrate([30, 20, 50]); } catch(e) {}
+
+      // Shatter particles
+      for (let i = 0; i < 12; i++) {
+        G.particles.push({
+          x: G.bert.x, y: G.bert.y,
+          vx: (Math.random() - 0.5) * 6,
+          vy: (Math.random() - 0.5) * 6,
+          life: 25 + Math.random() * 15,
+          maxLife: 40,
+          color: '#00aaff',
+          size: Math.random() * 3 + 1,
+        });
+      }
+
+      // +5 coin survival bonus
+      G.coins += 5;
+      G.coinsEarned += 5;
+      updateCoinDisplay();
+      G.particles.push({
+        x: G.bert.x, y: G.bert.y - 40,
+        vx: 0, vy: -1,
+        life: 30, maxLife: 30,
+        text: 'SHIELD! +5',
+        color: '#00aaff',
+        size: 10,
+      });
+
+      // Check shield_breaker badge
+      checkShieldBadge();
+      saveData();
+    } else {
+      gameOver();
+    }
   }
 }
 
@@ -1865,6 +1960,28 @@ function render() {
         const cy = p.gapY + p.moveOffset + p.gapH / 2;
         drawCoin(ctx, cx, cy);
       }
+      // Draw shield in pipe gap
+      if (p.hasShield && !p.shieldCollected) {
+        const sx = p.x + G.pipeWidth / 2;
+        const sy = p.gapY + p.moveOffset + p.gapH / 2;
+        const pulse = 1 + Math.sin(G.frameCount * 0.1) * 0.15;
+        const r = 10 * pulse;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(sx, sy, r + 3, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0,170,255,0.2)';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        ctx.fillStyle = '#00aaff';
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('\u{1F6E1}', sx, sy);
+        ctx.restore();
+      }
     }
     
     // Bert
@@ -1881,8 +1998,18 @@ function render() {
       ctx.stroke();
       ctx.restore();
     }
+
+    // Shield indicator
+    if (G.hasShield && (G.state === 'playing' || G.state === 'ready')) {
+      ctx.save();
+      ctx.fillStyle = '#00aaff';
+      ctx.font = '16px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('\u{1F6E1}', 8, 56);
+      ctx.restore();
+    }
   }
-  
+
   // Ground
   drawGround(ctx, w, h);
   
