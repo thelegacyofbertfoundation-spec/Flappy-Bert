@@ -336,6 +336,10 @@ html, body {
 }
 .new-best { color: var(--success); animation: newBestPulse 0.5s ease-in-out infinite alternate; }
 @keyframes newBestPulse { from { opacity: 0.7; } to { opacity: 1; } }
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.8; }
+}
 
 /* Power indicator */
 .power-bar {
@@ -511,21 +515,30 @@ html, body {
 <!-- Game Over -->
 <div class="overlay" id="gameOverOverlay">
   <div class="go-panel">
+    <div id="goBadgePopup" style="display:none;font-size:10px;color:#ffd700;margin-bottom:6px;animation:pulse 0.5s ease-in-out 3"></div>
     <div class="go-title">GAME OVER</div>
     <div id="goMedal" style="font-size:36px;margin:4px 0;display:none"></div>
     <div class="go-label">SCORE</div>
     <div class="go-score" id="goScore">0</div>
     <div class="go-best" id="goBest">BEST: 0</div>
+    <div id="goRankNudge" style="font-size:7px;color:var(--accent3);margin:4px 0;display:none"></div>
     <div class="go-coins" id="goCoins">+0 &#x1FA99;</div>
+    <div id="goDoubleCoins" style="display:none;margin:4px 0">
+      <button class="btn btn-gold" style="font-size:7px;padding:6px 12px" onclick="doubleCoinsWithAd()">&#x1F3AC; WATCH AD TO DOUBLE</button>
+    </div>
     <div class="go-level" id="goLevel">LEVEL 1</div>
     <div id="goCombo" style="font-size:7px;color:#ffb800;margin:4px 0;display:none"></div>
     <div id="goMultiplier" style="font-size:7px;color:var(--accent3);margin:4px 0;display:none"></div>
     <div id="goTournament" style="font-size:7px;color:#ffd700;margin:4px 0;display:none"></div>
-    <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
-      <button class="btn btn-primary" onclick="startGame()">&#x1F504; RETRY</button>
-      <button class="btn btn-gold" style="min-width:100px" onclick="shareScoreCard()">&#x1F4F7; SHARE</button>
+    <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:8px">
+      <button class="btn btn-primary" style="min-width:120px" onclick="startGame()">&#x1F504; PLAY AGAIN</button>
+      <button class="btn btn-gold" id="goContinueBtn" style="min-width:120px;display:none" onclick="continueWithAd()">&#x25B6;&#xFE0F; CONTINUE</button>
     </div>
-    <button class="btn btn-secondary" onclick="showMenu()">&#x1F3E0; MENU</button>
+    <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:6px">
+      <button class="btn btn-secondary" style="font-size:7px;padding:6px 10px" onclick="showMenu()">&#x1F3E0; MENU</button>
+      <button class="btn btn-secondary" style="font-size:7px;padding:6px 10px" onclick="showShop()">&#x1F6D2; SHOP</button>
+      <button class="btn btn-secondary" style="font-size:7px;padding:6px 10px" onclick="showLeaderboard()">&#x1F3C6; RANKS</button>
+    </div>
   </div>
 </div>
 
@@ -1378,63 +1391,120 @@ function gameOver() {
 
 function showGameOverScreen() {
   G.state = 'gameover';
-  
-  // Add level bonus to coins earned (score+coins already accumulated during play)
+
+  // Add level bonus to coins earned
   G.coinsEarned += (G.level - 1) * 5;
   if (G.bestCombo >= 5) G.coinsEarned += G.bestCombo;
   G.coins += G.coinsEarned;
-  
-  // Track daily stats for challenges
+
+  // Track daily stats
   G.coinsEarnedToday += G.coinsEarned;
   if (G.bestCombo > G.bestComboToday) G.bestComboToday = G.bestCombo;
   checkDailyChallenges();
-  
+
+  // Check badges before displaying
+  const newBadges = checkBadges();
+
   const isNewBest = G.score > G.bestScore;
   if (isNewBest) G.bestScore = G.score;
-  
+
   updateLeaderboard(G.playerName, G.score);
-  saveData();  // Save BEFORE server submit — sendData() can close the WebApp
+  saveData();
   updateCoinDisplay();
-  submitScoreToServer(G.score, G.level, G.coinsEarned);
-  submitTournamentScore(G.score, G.level, G.coinsEarned);
-  
+
+  // Increment interstitial counter
+  G.adInterstitialCounter++;
+
   document.getElementById('scoreDisplay').style.display = 'none';
   document.getElementById('levelIndicator').style.display = 'none';
   document.getElementById('multBar').style.display = 'none';
-  
-  // Medal
-  const medalEl = document.getElementById('goMedal');
-  if (G.score >= 50) { medalEl.textContent = '\u{1F48E}'; medalEl.style.display = 'block'; }
-  else if (G.score >= 30) { medalEl.textContent = '\u{1F947}'; medalEl.style.display = 'block'; }
-  else if (G.score >= 20) { medalEl.textContent = '\u{1F948}'; medalEl.style.display = 'block'; }
-  else if (G.score >= 10) { medalEl.textContent = '\u{1F949}'; medalEl.style.display = 'block'; }
-  else { medalEl.style.display = 'none'; }
-  
-  document.getElementById('goScore').textContent = G.score;
-  document.getElementById('goScore').className = isNewBest ? 'go-score new-best' : 'go-score';
-  document.getElementById('goBest').textContent = 'BEST: ' + G.bestScore;
-  document.getElementById('goBest').className = isNewBest ? 'go-best new-best' : 'go-best';
-  document.getElementById('goCoins').innerHTML = '+' + G.coinsEarned + ' &#x1FA99;';
-  document.getElementById('goLevel').textContent = 'REACHED LEVEL ' + G.level;
-  
+
+  // Populate game over screen
+  const goScore = document.getElementById('goScore');
+  const goBest = document.getElementById('goBest');
+  const goCoins = document.getElementById('goCoins');
+  const goLevel = document.getElementById('goLevel');
+  const goCombo = document.getElementById('goCombo');
+  const goMedal = document.getElementById('goMedal');
+  const goMultiplier = document.getElementById('goMultiplier');
+  const goRankNudge = document.getElementById('goRankNudge');
+  const goBadgePopup = document.getElementById('goBadgePopup');
+  const goContinueBtn = document.getElementById('goContinueBtn');
+  const goDoubleCoins = document.getElementById('goDoubleCoins');
+
+  goScore.textContent = G.score;
+  goScore.className = isNewBest ? 'go-score new-best' : 'go-score';
+
+  // Best-score messaging
+  if (isNewBest) {
+    goBest.textContent = '\u{2605} NEW BEST! \u{2605}';
+    goBest.style.color = '#ffd700';
+    goBest.className = 'go-best new-best';
+  } else {
+    const diff = G.bestScore - G.score;
+    goBest.textContent = diff + ' away from your best!';
+    goBest.style.color = '';
+    goBest.className = 'go-best';
+  }
+
+  goCoins.innerHTML = '+' + G.coinsEarned + ' &#x1FA99;';
+  goLevel.textContent = 'LEVEL ' + G.level;
+
   // Combo display
-  const comboEl = document.getElementById('goCombo');
   if (G.bestCombo >= 3) {
-    comboEl.textContent = 'BEST STREAK: ' + G.bestCombo + 'x';
-    comboEl.style.display = 'block';
+    goCombo.style.display = 'block';
+    goCombo.textContent = 'BEST COMBO: ' + G.bestCombo + 'x';
   } else {
-    comboEl.style.display = 'none';
+    goCombo.style.display = 'none';
   }
-  
-  // Multiplier display
-  const multEl = document.getElementById('goMultiplier');
+
+  // Medal
+  if (G.score >= 100) { goMedal.textContent = '\u{1F947}'; goMedal.style.display = 'block'; }
+  else if (G.score >= 50) { goMedal.textContent = '\u{1F948}'; goMedal.style.display = 'block'; }
+  else if (G.score >= 25) { goMedal.textContent = '\u{1F949}'; goMedal.style.display = 'block'; }
+  else { goMedal.style.display = 'none'; }
+
+  // Multiplier note
   if (G.scoreMultiplier > 1) {
-    multEl.textContent = G.scoreMultiplier + 'X MULTIPLIER ACTIVE';
-    multEl.style.display = 'block';
+    goMultiplier.style.display = 'block';
+    goMultiplier.textContent = G.scoreMultiplier + 'x MULTIPLIER ACTIVE';
   } else {
-    multEl.style.display = 'none';
+    goMultiplier.style.display = 'none';
   }
-  
+
+  // Rank nudge (uses cached leaderboard data)
+  goRankNudge.style.display = 'none';
+  if (G.leaderboard && G.leaderboard.length > 0) {
+    const myRank = G.leaderboard.findIndex(e => e.score <= G.score);
+    if (myRank >= 0 && myRank < 10) {
+      goRankNudge.style.display = 'block';
+      goRankNudge.textContent = "You're #" + (myRank + 1) + ' this week!';
+    } else if (G.leaderboard.length > 0) {
+      const nextAbove = G.leaderboard.find(e => e.score > G.score);
+      if (nextAbove) {
+        goRankNudge.style.display = 'block';
+        goRankNudge.textContent = (nextAbove.score - G.score) + ' points behind #' + G.leaderboard.indexOf(nextAbove) + '!';
+      }
+    }
+  }
+
+  // Badge popup
+  goBadgePopup.style.display = 'none';
+  if (newBadges.length > 0) {
+    const badge = BADGES.find(b => b.id === newBadges[0]);
+    if (badge) {
+      goBadgePopup.style.display = 'block';
+      goBadgePopup.innerHTML = '\u{1F3C6} ' + badge.name.toUpperCase() + ' UNLOCKED! +' + badge.reward + ' &#x1FA99;';
+      setTimeout(() => { goBadgePopup.style.display = 'none'; }, 3000);
+    }
+  }
+
+  // Continue button (rewarded ad, once per game, only if ad ready)
+  goContinueBtn.style.display = (!G.adContinueUsed && AdSystem.isRewardedReady()) ? '' : 'none';
+
+  // Double coins button (only if ad ready and coins > 0)
+  goDoubleCoins.style.display = (G.coinsEarned > 0 && AdSystem.isRewardedReady()) ? '' : 'none';
+
   // Tournament display
   const tournEl = document.getElementById('goTournament');
   if (getTournamentStatus() === 'live') {
@@ -1443,7 +1513,12 @@ function showGameOverScreen() {
   } else {
     tournEl.style.display = 'none';
   }
-  
+
+  // Interstitial ad every 4th game
+  if (G.adInterstitialCounter % 4 === 0 && AdSystem.isInterstitialReady()) {
+    AdSystem.showInterstitial(() => {});
+  }
+
   showOverlay('gameOverOverlay');
 }
 
