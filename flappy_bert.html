@@ -660,6 +660,42 @@ const CHALLENGE_TEMPLATES = [
 
 const STREAK_REWARDS = [10, 25, 50, 75, 100, 150, 250];
 
+const BADGES = [
+  { id: 'rookie', name: 'Rookie', requirement: 'Score 10 in one game', abbr: 'RK', color: '#cd7f32', reward: 25, check: () => G.score >= 10 },
+  { id: 'pipe_dodger', name: 'Pipe Dodger', requirement: 'Score 25', abbr: 'PD', color: '#c0c0c0', reward: 50, check: () => G.score >= 25 },
+  { id: 'sky_king', name: 'Sky King', requirement: 'Score 50', abbr: 'SK', color: '#ffd700', reward: 100, check: () => G.score >= 50 },
+  { id: 'legend', name: 'Legend', requirement: 'Score 100', abbr: 'LG', color: '#ff6b35', reward: 250, check: () => G.score >= 100 },
+  { id: 'immortal', name: 'Immortal', requirement: 'Score 200', abbr: 'IM', color: '#ff3860', reward: 500, check: () => G.score >= 200 },
+  { id: 'streak_master', name: 'Streak Master', requirement: '7-day login streak', abbr: 'SM', color: '#44d62c', reward: 150, check: () => G.dailyStreak >= 7 },
+  { id: 'combo_king', name: 'Combo King', requirement: 'Hit 10x combo', abbr: 'CK', color: '#ffb800', reward: 100, check: () => G.bestCombo >= 10 },
+  { id: 'close_call', name: 'Close Call', requirement: '20 near-misses in one game', abbr: 'CC', color: '#00e5ff', reward: 75, check: () => G.nearMissesThisGame >= 20 },
+  { id: 'shield_breaker', name: 'Shield Breaker', requirement: 'Use 10 shields total', abbr: 'SB', color: '#8844ff', reward: 50, check: () => G.shieldsUsedTotal >= 10 },
+];
+
+function checkBadges() {
+  const newlyEarned = [];
+  for (const badge of BADGES) {
+    if (G.earnedBadges.includes(badge.id)) continue;
+    if (badge.check()) {
+      G.earnedBadges.push(badge.id);
+      G.coins += badge.reward;
+      newlyEarned.push(badge.id);
+    }
+  }
+  if (newlyEarned.length > 0) saveData();
+  return newlyEarned;
+}
+
+function checkShieldBadge() {
+  const badge = BADGES.find(b => b.id === 'shield_breaker');
+  if (badge && !G.earnedBadges.includes('shield_breaker') && badge.check()) {
+    G.earnedBadges.push('shield_breaker');
+    G.coins += badge.reward;
+    saveData();
+    showToast('\u{1F3C6} Shield Breaker unlocked! +' + badge.reward);
+  }
+}
+
 // ========== SPRITE LOADING ==========
 const bertSprite = new Image();
 bertSprite.src = SPRITE_B64;
@@ -1696,6 +1732,7 @@ function update() {
         G.coins += nearBonus;
         G.coinsEarned += nearBonus;
         G.nearMissesToday++;
+        G.nearMissesThisGame++;
         updateCoinDisplay();
         scoreText = 'CLOSE! +3';
         scoreColor = '#ff3860';
@@ -2549,6 +2586,8 @@ function checkDailyLogin() {
   
   G.lastLoginDate = today;
   G.streakClaimed = false;
+  // Check streak badge
+  checkBadges();
   // Reset daily challenge trackers
   G.gamesPlayedToday = 0;
   G.nearMissesToday = 0;
