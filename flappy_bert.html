@@ -3101,8 +3101,8 @@ function renderChallenges() {
 
 // ========== TOURNAMENT SYSTEM ==========
 const TOURNAMENT = {
-  id: 'april-flapoff-2026',
-  name: 'April Flap-off 2026',
+  id: 'april-fools-flapoff-2026',
+  name: 'April Fools Flap-off 2026',
   sponsor: 'Dr. Inker LABS',
   start: new Date('2026-04-01T00:00:00Z'),
   end: new Date('2026-04-30T23:59:59Z'),
@@ -3120,15 +3120,19 @@ function getTournamentCountdown() {
   const status = getTournamentStatus();
   if (status === 'scheduled') {
     const diff = TOURNAMENT.start.getTime() - now.getTime();
-    const h = Math.floor(diff / 3600000);
+    const d = Math.floor(diff / 86400000);
+    const h = Math.floor((diff % 86400000) / 3600000);
     const m = Math.floor((diff % 3600000) / 60000);
     const s = Math.floor((diff % 60000) / 1000);
+    if (d > 0) return `Starts in ${d}d ${h}h ${m}m`;
     return `Starts in ${h}h ${m}m ${s}s`;
   }
   if (status === 'live') {
     const diff = TOURNAMENT.end.getTime() - now.getTime();
-    const h = Math.floor(diff / 3600000);
+    const d = Math.floor(diff / 86400000);
+    const h = Math.floor((diff % 86400000) / 3600000);
     const m = Math.floor((diff % 3600000) / 60000);
+    if (d > 0) return `LIVE — ${d}d ${h}h remaining`;
     return `LIVE — Ends in ${h}h ${m}m`;
   }
   return 'Tournament ended';
@@ -3138,31 +3142,27 @@ function updateTournamentUI() {
   const btn = document.getElementById('tournamentBtn');
   const statusEl = document.getElementById('tournamentStatus');
   const status = getTournamentStatus();
-  const now = new Date();
-  
-  // Show button if within 2 hours of start, during, or after
-  const showTime = new Date(TOURNAMENT.start.getTime() - 2 * 3600000);
-  if (now >= showTime) {
-    btn.style.display = '';
-    statusEl.style.display = '';
-    
-    if (status === 'scheduled') {
-      statusEl.textContent = getTournamentCountdown();
-      statusEl.style.color = '#7a7e9a';
-    } else if (status === 'live') {
-      statusEl.innerHTML = '\u{1F534} ' + getTournamentCountdown();
-      statusEl.style.color = '#44d62c';
-      btn.style.borderColor = '#44d62c';
-      btn.style.color = '#44d62c';
-    } else {
-      statusEl.textContent = '\u{1F3C1} Tournament ended';
-      statusEl.style.color = '#7a7e9a';
-      btn.style.borderColor = '#7a7e9a';
-      btn.style.color = '#7a7e9a';
-    }
+
+  // Always show tournament button with countdown
+  btn.style.display = '';
+  statusEl.style.display = '';
+  btn.textContent = '\u{1F3DF} ' + TOURNAMENT.name.toUpperCase();
+
+  if (status === 'scheduled') {
+    statusEl.textContent = '\u{23F3} ' + getTournamentCountdown();
+    statusEl.style.color = '#ffd700';
+    btn.style.borderColor = '#ffd700';
+    btn.style.color = '#ffd700';
+  } else if (status === 'live') {
+    statusEl.textContent = '\u{1F534} ' + getTournamentCountdown();
+    statusEl.style.color = '#44d62c';
+    btn.style.borderColor = '#44d62c';
+    btn.style.color = '#44d62c';
   } else {
-    btn.style.display = 'none';
-    statusEl.style.display = 'none';
+    statusEl.textContent = '\u{1F3C1} Tournament ended';
+    statusEl.style.color = '#7a7e9a';
+    btn.style.borderColor = '#7a7e9a';
+    btn.style.color = '#7a7e9a';
   }
 }
 

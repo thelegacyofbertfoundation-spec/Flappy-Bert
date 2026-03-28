@@ -182,8 +182,8 @@ db.createTournament(
   '2026-03-19T23:59:59Z'
 );
 db.createTournament(
-  'april-flapoff-2026',
-  'April Flap-off 2026',
+  'april-fools-flapoff-2026',
+  'April Fools Flap-off 2026',
   'Dr. Inker LABS',
   '2026-04-01T00:00:00Z',
   '2026-04-30T23:59:59Z'
@@ -400,7 +400,7 @@ bot.onText(/\/resettournament/, (msg) => {
   if (!ADMIN_IDS.includes(msg.from.id)) return;
   
   try {
-    db.resetTournamentScores('april-flapoff-2026');
+    db.resetTournamentScores('april-fools-flapoff-2026');
     bot.sendMessage(msg.chat.id, '🗑 All tournament scores wiped. Tournament continues with a clean leaderboard.', { parse_mode: 'Markdown' });
     console.log(`🗑 Admin ${msg.from.id} reset tournament scores`);
   } catch(err) {
