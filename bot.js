@@ -56,6 +56,23 @@ function generateSessionId() {
   return crypto.randomBytes(16).toString('hex');
 }
 
+function validateTelegramInitData(initData) {
+  if (!initData) return null;
+  try {
+    const params = new URLSearchParams(initData);
+    const hash = params.get('hash');
+    if (!hash) return null;
+    params.delete('hash');
+    const sorted = [...params.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const dataCheckString = sorted.map(([k, v]) => `${k}=${v}`).join('\n');
+    const secretKey = crypto.createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest();
+    const computed = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+    if (computed !== hash) return null;
+    const user = params.get('user');
+    return user ? JSON.parse(user) : null;
+  } catch(e) { return null; }
+}
+
 function validateScore(session, body) {
   const { score, level, shieldUsed, adContinueUsed } = body;
   const issues = [];
@@ -101,9 +118,21 @@ function validateScore(session, body) {
     console.log(`⚠️  Score flagged [${tid}]: score=${score} issues=[${issues.join(',')}]`);
   }
 
-  // Only reject on session_reused + high score (replay attack)
+  // Reject replay attacks
   if (issues.includes('session_reused') && score > 20) {
     return { valid: false, reason: 'session_reused' };
+  }
+  // Reject sessionless high scores (curl attacks)
+  if (issues.includes('no_session') && score > 30) {
+    return { valid: false, reason: 'no_session_high_score' };
+  }
+  // Reject impossibly fast scores
+  if (issues.includes('too_fast') && score > 15) {
+    return { valid: false, reason: 'too_fast' };
+  }
+  // Reject scores exceeding time-based limit
+  if (issues.includes('score_exceeds_time') && score > 30) {
+    return { valid: false, reason: 'score_exceeds_time' };
   }
 
   return { valid: true, issues, flagged: issues.length > 0 };
@@ -122,6 +151,28 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
 
+// Simple rate limiter — per IP, 30 requests per minute
+const rateLimits = new Map();
+function rateLimit(limit = 30, windowMs = 60000) {
+  return (req, res, next) => {
+    const key = req.ip;
+    const now = Date.now();
+    const entry = rateLimits.get(key) || { count: 0, resetAt: now + windowMs };
+    if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + windowMs; }
+    entry.count++;
+    rateLimits.set(key, entry);
+    if (entry.count > limit) return res.status(429).json({ error: 'Too many requests' });
+    next();
+  };
+}
+// Clean rate limit entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of rateLimits) {
+    if (now > entry.resetAt) rateLimits.delete(key);
+  }
+}, 5 * 60 * 1000);
+
 // Seed tournaments
 db.createTournament(
   'champions-flapoff-1',
@@ -129,6 +180,13 @@ db.createTournament(
   'TraderSZ',
   '2026-02-19T17:00:00Z',
   '2026-03-19T23:59:59Z'
+);
+db.createTournament(
+  'april-flapoff-2026',
+  'April Flap-off 2026',
+  'Dr. Inker LABS',
+  '2026-04-01T00:00:00Z',
+  '2026-04-30T23:59:59Z'
 );
 
 console.log('🐕  Flappy Bert Bot starting…');
@@ -342,7 +400,7 @@ bot.onText(/\/resettournament/, (msg) => {
   if (!ADMIN_IDS.includes(msg.from.id)) return;
   
   try {
-    db.resetTournamentScores('champions-flapoff-1');
+    db.resetTournamentScores('april-flapoff-2026');
     bot.sendMessage(msg.chat.id, '🗑 All tournament scores wiped. Tournament continues with a clean leaderboard.', { parse_mode: 'Markdown' });
     console.log(`🗑 Admin ${msg.from.id} reset tournament scores`);
   } catch(err) {
@@ -501,10 +559,18 @@ function authMiddleware(req, res, next) {
 }
 
 // POST /api/session — Start a game session (called when game starts)
-app.post('/api/session', (req, res) => {
-  const { telegram_id } = req.body;
+app.post('/api/session', rateLimit(10, 60000), (req, res) => {
+  const { telegram_id, init_data } = req.body;
   if (!telegram_id) return res.status(400).json({ error: 'telegram_id required' });
-  
+
+  // Validate Telegram identity if initData provided
+  if (init_data) {
+    const verified = validateTelegramInitData(init_data);
+    if (!verified || String(verified.id) !== String(telegram_id)) {
+      return res.status(403).json({ error: 'Invalid Telegram identity' });
+    }
+  }
+
   const sessionId = generateSessionId();
   gameSessions.set(sessionId, {
     id: sessionId,
@@ -517,18 +583,26 @@ app.post('/api/session', (req, res) => {
 });
 
 // POST /api/score
-// Body: { telegram_id, first_name, username?, score, level, coins_earned, session_id, frames, duration, signature }
-app.post('/api/score', (req, res) => {
+// Body: { telegram_id, first_name, username?, score, level, coins_earned, session_id, duration }
+app.post('/api/score', rateLimit(10, 60000), (req, res) => {
   try {
     const {
       telegram_id, first_name, username,
       score, level, coins_earned,
-      session_id, frames, duration, signature,
+      session_id, duration,
       badges, shieldUsed, adContinueUsed
     } = req.body;
 
     if (!telegram_id || score == null) {
       return res.status(400).json({ error: 'telegram_id and score are required' });
+    }
+
+    // Validate Telegram identity if initData provided
+    if (req.body.init_data) {
+      const verified = validateTelegramInitData(req.body.init_data);
+      if (!verified || String(verified.id) !== String(telegram_id)) {
+        return res.status(403).json({ error: 'Invalid Telegram identity' });
+      }
     }
 
     // Check if player is banned
@@ -639,7 +713,7 @@ app.get('/api/player/:id/card', (req, res) => {
 
 // POST /api/share — Send score card image to user's Telegram chat
 // Body: { telegram_id, image_base64, score, caption? }
-app.post('/api/share', async (req, res) => {
+app.post('/api/share', rateLimit(5, 60000), async (req, res) => {
   try {
     const { telegram_id, image_base64, score, caption } = req.body;
     

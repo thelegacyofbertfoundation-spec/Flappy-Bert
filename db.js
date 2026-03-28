@@ -176,9 +176,15 @@ function getPlayerWeeklyBest(telegramId) {
 
 function getPlayerRank(telegramId) {
   const week = getWeekStart();
-  const leaderboard = getWeeklyLeaderboard(1000);
-  const idx = leaderboard.findIndex(e => e.telegram_id === telegramId);
-  return idx >= 0 ? idx + 1 : null;
+  const row = db.prepare(`
+    SELECT rank FROM (
+      SELECT telegram_id, RANK() OVER (ORDER BY MAX(score) DESC) as rank
+      FROM scores
+      WHERE week_start = ?
+      GROUP BY telegram_id
+    ) WHERE telegram_id = ?
+  `).get(week, telegramId);
+  return row ? row.rank : null;
 }
 
 function getAllTimeStats(telegramId) {
@@ -245,9 +251,15 @@ function getTournamentLeaderboard(tournamentId, limit = 50) {
 }
 
 function getTournamentPlayerRank(tournamentId, telegramId) {
-  const lb = getTournamentLeaderboard(tournamentId, 1000);
-  const idx = lb.findIndex(e => e.telegram_id === telegramId);
-  return idx >= 0 ? idx + 1 : null;
+  const row = db.prepare(`
+    SELECT rank FROM (
+      SELECT telegram_id, RANK() OVER (ORDER BY MAX(score) DESC) as rank
+      FROM tournament_scores
+      WHERE tournament_id = ?
+      GROUP BY telegram_id
+    ) WHERE telegram_id = ?
+  `).get(tournamentId, telegramId);
+  return row ? row.rank : null;
 }
 
 // ── Admin: score removal ─────────────────────────────────────────────

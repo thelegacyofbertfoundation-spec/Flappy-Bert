@@ -223,7 +223,7 @@ html, body {
   margin-bottom: 4px;
 }
 .item-desc {
-  font-size: clamp(6px, 1.4vw, 7px);
+  font-size: clamp(9px, 2.2vw, 11px);
   color: var(--text-dim);
 }
 .item-price {
@@ -650,7 +650,8 @@ const G = {
   weekStart: 0,
   // Enemies
   enemies: [],
-  enemyTimer: 0,
+  _jeetCooldown: 0,
+  _jeetDrought: 0,
   // Death animation
   deathTimer: 0,
   // Screen shake & flash
@@ -658,7 +659,6 @@ const G = {
   shakeIntensity: 0,
   flashAlpha: 0,
   // Ready countdown
-  readyTimer: 0,
   readyBobFrame: 0,
   // Combo & near-miss
   combo: 0,
@@ -836,6 +836,13 @@ function resizeCanvas() {
   G.bertSize = Math.min(40, w * 0.1);
   G.groundHeight = Math.max(50, Math.min(70, h * 0.1));
   
+  // Clamp Bert position after resize to prevent instant death
+  if (G.bert && (G.state === 'playing' || G.state === 'ready')) {
+    const maxY = G.height - G.groundHeight - G.bertSize * 0.4;
+    const minY = G.bertSize * 0.4;
+    G.bert.y = Math.max(minY, Math.min(maxY, G.bert.y));
+  }
+
   // Show/hide landscape warning
   const isLandscape = window.innerWidth > window.innerHeight * 1.2;
   const warn = document.getElementById('landscapeWarning');
@@ -913,6 +920,10 @@ const AudioSystem = {
     osc.start(startTime);
     osc.stop(startTime + duration);
     this.musicNodes.push(osc);
+    // Prune stopped nodes to prevent unbounded growth
+    if (this.musicNodes.length > 256) {
+      this.musicNodes = this.musicNodes.slice(-128);
+    }
     return osc;
   },
   
@@ -1164,7 +1175,8 @@ function startGame() {
   G.frameCount = 0;
   G.pipes = [];
   G.enemies = [];
-  G.enemyTimer = 0;
+  G._jeetCooldown = 0;
+  G._jeetDrought = 0;
   G.particles = [];
   G.gameSpeed = G.baseSpeed;
   G.pipeGap = G.basePipeGap;
@@ -1187,7 +1199,6 @@ function startGame() {
   G.invincibleFrames = 0;
   G.nearMissesThisGame = 0;
   G.adContinueUsed = false;
-  G.readyTimer = 0;
   G.readyBobFrame = 0;
   
   // Apply equipped multiplier and consume 1 use
@@ -1370,25 +1381,40 @@ function addPipe() {
     G.shieldSpawnedThisGame = true;
   }
 
-  // 10% chance to spawn a JEETS enemy alongside this pipe (level 2+)
-  if (G.level >= 2 && Math.random() < 0.1) {
+  // JEETS spawn: cooldown prevents clustering, drought ramps chance back up
+  if (G._jeetCooldown > 0) G._jeetCooldown--;
+  const jeetChance = G._jeetCooldown > 0 ? 0 : Math.min(0.15, 0.05 + G._jeetDrought * 0.02);
+  if (G.level >= 2 && Math.random() < jeetChance) {
+    G._jeetCooldown = 3;  // min 3 pipes between JEETS
+    G._jeetDrought = 0;
     const playH = G.height - G.groundHeight;
     const speed = G.gameSpeed;
     const types = ['bat', 'ghost', 'spark'];
     const type = types[Math.floor(Math.random() * types.length)];
     const baseSpeed = speed * (0.6 + Math.random() * 0.8);
     const y = 60 + Math.random() * (playH - 140);
+    // Random size: 60% normal, 25% big (2x), 15% huge (3x)
+    const sizeRoll = Math.random();
+    const scale = sizeRoll < 0.60 ? 1 : sizeRoll < 0.85 ? 2 : 3;
     G.enemies.push({
       type,
       x: G.width + 20,
       y,
-      vx: -baseSpeed,
+      vx: -baseSpeed * (scale === 3 ? 0.7 : scale === 2 ? 0.85 : 1), // bigger = slower
       baseY: y,
       age: 0,
-      size: 14,
-      amplitude: type === 'ghost' ? 30 + Math.random() * 20 : 15 + Math.random() * 10,
+      size: 14 * scale,
+      scale,
+      amplitude: (type === 'ghost' ? 30 + Math.random() * 20 : 15 + Math.random() * 10) * (0.8 + scale * 0.3),
       freq: type === 'ghost' ? 0.015 : 0.04 + Math.random() * 0.02,
+      // Unpredictable movement: secondary wobble + random direction changes
+      freq2: 0.007 + Math.random() * 0.015,       // slow secondary wave
+      amp2: 10 + Math.random() * 25,               // secondary amplitude
+      vyDrift: (Math.random() - 0.5) * 0.4,        // slight vertical drift
+      nextDirChange: 60 + Math.floor(Math.random() * 120), // frames until direction shift
     });
+  } else if (G.level >= 2) {
+    G._jeetDrought++;  // no spawn — increase chance for next pipe
   }
 }
 
@@ -1764,6 +1790,56 @@ function updateLeaderboard(name, score) {
     },
     configurable: false,
   });
+
+  // Protect coins — only allow small increments during play, save/load sets freely outside play
+  let _coins = G.coins || 0;
+  Object.defineProperty(G, 'coins', {
+    get() { return _coins; },
+    set(v) {
+      if (typeof v !== 'number' || !isFinite(v) || v < 0) return;
+      if (G.state === 'playing' || G.state === 'dying') {
+        // During gameplay: allow increments up to 10 (combo bonus) or decrements (shop purchases shouldn't happen mid-game)
+        const diff = v - _coins;
+        if (diff >= 0 && diff <= 10) _coins = v;
+      } else {
+        // Outside gameplay: allow any valid value (shop purchases, save/load)
+        _coins = Math.floor(v);
+      }
+    },
+    configurable: false,
+  });
+
+  // Protect combo — can only increment by 1 or reset to 0
+  let _combo = G.combo || 0;
+  Object.defineProperty(G, 'combo', {
+    get() { return _combo; },
+    set(v) {
+      if (v === 0 || v === _combo + 1) _combo = v;
+    },
+    configurable: false,
+  });
+
+  // Protect bestCombo — can only increase to current combo value or reset to 0
+  let _bestCombo = G.bestCombo || 0;
+  Object.defineProperty(G, 'bestCombo', {
+    get() { return _bestCombo; },
+    set(v) {
+      if (v === 0) _bestCombo = 0;
+      else if (v === _combo && v > _bestCombo) _bestCombo = v;
+    },
+    configurable: false,
+  });
+
+  // Protect _scoreAccum — only allow small fractional increments
+  let _scoreAccumVal = G._scoreAccum || 0;
+  Object.defineProperty(G, '_scoreAccum', {
+    get() { return _scoreAccumVal; },
+    set(v) {
+      if (v === 0) _scoreAccumVal = 0;
+      else if (typeof v === 'number' && v >= 0 && v < _scoreAccumVal + 3) _scoreAccumVal = v;
+    },
+    configurable: false,
+  });
 })();
 
 function gameLoop(ts) {
@@ -1929,7 +2005,7 @@ function update() {
       let scoreColor = '#fff';
       
       if (isNearMiss) {
-        const nearBonus = 2;
+        const nearBonus = 3;
         G.coins += nearBonus;
         G.coinsEarned += nearBonus;
         G.nearMissesToday++;
@@ -2030,10 +2106,22 @@ function update() {
     const e = G.enemies[i];
     e.x += e.vx;
     e.age++;
-    e.y = e.baseY + Math.sin(e.age * e.freq) * e.amplitude;
+    // Primary wave + secondary wobble for unpredictable paths
+    e.baseY += e.vyDrift || 0;
+    // Clamp baseY to playable area
+    const playH = G.height - G.groundHeight;
+    if (e.baseY < 60) { e.baseY = 60; e.vyDrift = Math.abs(e.vyDrift || 0.2); }
+    if (e.baseY > playH - 60) { e.baseY = playH - 60; e.vyDrift = -Math.abs(e.vyDrift || 0.2); }
+    // Random direction changes
+    if (e.nextDirChange !== undefined && e.age >= e.nextDirChange) {
+      e.vyDrift = (Math.random() - 0.5) * 0.6;
+      e.nextDirChange = e.age + 60 + Math.floor(Math.random() * 120);
+    }
+    e.y = e.baseY + Math.sin(e.age * e.freq) * e.amplitude
+         + Math.sin(e.age * (e.freq2 || 0.01)) * (e.amp2 || 0);
 
     // Remove off-screen
-    if (e.x < -30) {
+    if (e.x < -30 * (e.scale || 1)) {
       G.enemies.splice(i, 1);
       continue;
     }
@@ -2077,7 +2165,8 @@ function update() {
   G.ground.offset = (G.ground.offset + speed) % 32;
   G.scrollDistance += speed;
 
-  // Particles
+  // Particles (cap at 80 to prevent frame drops on low-end devices)
+  while (G.particles.length > 80) G.particles.shift();
   for (let i = G.particles.length - 1; i >= 0; i--) {
     const p = G.particles[i];
     p.x += p.vx || 0;
@@ -2085,7 +2174,7 @@ function update() {
     p.life--;
     if (p.life <= 0) G.particles.splice(i, 1);
   }
-  
+
   // Collision
   if (G.invincibleFrames > 0) {
     G.invincibleFrames--;
@@ -2280,7 +2369,8 @@ function render() {
       ctx.translate(e.x, e.y);
       ctx.globalAlpha = 0.7 + Math.sin(e.age * 0.1) * 0.15;
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 14px "Press Start 2P", monospace';
+      const fontSize = 14 * (e.scale || 1);
+      ctx.font = `bold ${fontSize}px "Press Start 2P", monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('JEETS', 0, 0);
@@ -2989,8 +3079,10 @@ function showChallenges() {
 
 function renderChallenges() {
   let html = '';
-  const resetHr = 24 - new Date().getHours();
-  html += `<div style="text-align:center;font-size:6px;color:var(--text-dim);margin-bottom:12px">Resets in ~${resetHr}h</div>`;
+  const now = new Date();
+  const msUntilReset = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) - now.getTime();
+  const resetHr = Math.ceil(msUntilReset / 3600000);
+  html += `<div style="text-align:center;font-size:9px;color:var(--text-dim);margin-bottom:12px">Resets in ~${resetHr}h</div>`;
   
   G.dailyChallenges.forEach((ch, i) => {
     const done = ch.completed;
@@ -3009,11 +3101,11 @@ function renderChallenges() {
 
 // ========== TOURNAMENT SYSTEM ==========
 const TOURNAMENT = {
-  id: 'champions-flapoff-1',
-  name: 'Champions Flap-off',
-  sponsor: 'TraderSZ',
-  start: new Date('2026-02-19T17:00:00Z'),
-  end: new Date('2026-03-19T23:59:59Z'),
+  id: 'april-flapoff-2026',
+  name: 'April Flap-off 2026',
+  sponsor: 'Dr. Inker LABS',
+  start: new Date('2026-04-01T00:00:00Z'),
+  end: new Date('2026-04-30T23:59:59Z'),
 };
 
 function getTournamentStatus() {
@@ -3204,12 +3296,16 @@ async function shareScoreCard() {
     x.drawImage(bertSprite, -sz*0.6, -sz/2, sz*1.2, sz);
     // Tint overlay
     if (G.equippedSkin !== 'default') {
-      x.globalCompositeOperation = 'source-atop';
-      x.globalAlpha = 0.4;
-      x.fillStyle = skin.color;
-      x.fillRect(-sz*0.6, -sz/2, sz*1.2, sz);
-      x.globalCompositeOperation = 'source-over';
-      x.globalAlpha = 1;
+      // Use offscreen canvas for correct source-atop compositing
+      const tC = document.createElement('canvas');
+      tC.width = sz * 1.2; tC.height = sz;
+      const tX = tC.getContext('2d');
+      tX.drawImage(bertSprite, 0, 0, sz * 1.2, sz);
+      tX.globalCompositeOperation = 'source-atop';
+      tX.globalAlpha = 0.4;
+      tX.fillStyle = skin.color;
+      tX.fillRect(0, 0, sz * 1.2, sz);
+      x.drawImage(tC, -sz*0.6, -sz/2);
     }
     x.restore();
   }
@@ -3227,7 +3323,7 @@ async function shareScoreCard() {
   x.shadowBlur = 0;
   
   // Medal
-  const medals = { 50: '\u{1F48E}', 30: '\u{1F947}', 20: '\u{1F948}', 10: '\u{1F949}' };
+  const medals = { 100: '\u{1F48E}', 50: '\u{1F947}', 25: '\u{1F948}', 10: '\u{1F949}' };
   for (const [threshold, emoji] of Object.entries(medals).sort((a,b) => b[0]-a[0])) {
     if (G.score >= parseInt(threshold)) {
       x.font = '40px serif';
@@ -3402,6 +3498,10 @@ function getTelegramUser() {
   return null;
 }
 
+function getTelegramInitData() {
+  try { return window.Telegram?.WebApp?.initData || null; } catch(e) { return null; }
+}
+
 async function requestGameSession() {
   const user = getTelegramUser();
   if (!user) return;
@@ -3410,7 +3510,7 @@ async function requestGameSession() {
     const res = await fetch((API_BASE || '') + '/api/session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ telegram_id: user.id }),
+      body: JSON.stringify({ telegram_id: user.id, init_data: getTelegramInitData() }),
     });
     const data = await res.json();
     _gameSession = data.session_id || null;
@@ -3421,7 +3521,6 @@ async function submitScoreToServer(score, level, coinsEarned) {
   const user = getTelegramUser();
   if (!user) return;
   const duration = Date.now() - _gameStartTime;
-  const frames = G.frameCount || 0;
   try {
     await fetch((API_BASE || '') + '/api/score', {
       method: 'POST',
@@ -3430,13 +3529,22 @@ async function submitScoreToServer(score, level, coinsEarned) {
         telegram_id: user.id, first_name: user.first_name,
         username: user.username, score, level, coins_earned: coinsEarned,
         session_id: _gameSession,
-        frames, duration,
+        duration,
         badges: G.earnedBadges,
         shieldUsed: G.shieldUsedThisGame,
         adContinueUsed: G.adContinueUsed,
+        init_data: getTelegramInitData(),
       }),
     });
-  } catch(e) {}
+  } catch(e) {
+    console.warn('Score submission failed:', e.message);
+    // Brief toast so player knows score may not have saved
+    const toast = document.createElement('div');
+    toast.textContent = 'Score save failed — check connection';
+    toast.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);background:#ff3860;color:#fff;padding:6px 14px;border-radius:8px;font-size:11px;z-index:9999;opacity:0.9';
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+  }
 }
 
 async function fetchServerLeaderboard() {
