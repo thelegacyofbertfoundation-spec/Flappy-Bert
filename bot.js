@@ -74,7 +74,7 @@ function validateTelegramInitData(initData) {
 }
 
 function validateScore(session, body) {
-  const { score, level, shieldUsed, adContinueUsed } = body;
+  const { score, level, shieldUsed, adContinueUsed, scoreMultiplier } = body;
   const issues = [];
 
   // 1. Hard score cap — only true hard reject
@@ -97,14 +97,17 @@ function validateScore(session, body) {
       issues.push('too_fast');
     }
 
-    // Relax time-based threshold when shield/ad continue used
-    let maxScorePerSecond = SCORE_LIMITS.MAX_SCORE_PER_SECOND;
+    // Scale rate limit by score multiplier (1x, 1.5x, or 2x)
+    const mult = (scoreMultiplier === 1.5 || scoreMultiplier === 2) ? scoreMultiplier : 1;
+    let maxScorePerSecond = SCORE_LIMITS.MAX_SCORE_PER_SECOND * mult;
+
+    // Further relax when shield/ad continue used
     if (shieldUsed && adContinueUsed) {
-      maxScorePerSecond *= 1.5;  // 50% relaxation for both
+      maxScorePerSecond *= 1.5;
     } else if (shieldUsed) {
-      maxScorePerSecond *= 1.2;  // 20% relaxation for shield
+      maxScorePerSecond *= 1.2;
     } else if (adContinueUsed) {
-      maxScorePerSecond *= 1.2;  // 20% relaxation for ad continue
+      maxScorePerSecond *= 1.2;
     }
 
     const maxScoreForTime = Math.ceil((elapsed / 1000) * maxScorePerSecond);
@@ -590,7 +593,7 @@ app.post('/api/score', rateLimit(10, 60000), (req, res) => {
       telegram_id, first_name, username,
       score, level, coins_earned,
       session_id, duration,
-      badges, shieldUsed, adContinueUsed
+      badges, shieldUsed, adContinueUsed, scoreMultiplier
     } = req.body;
 
     if (!telegram_id || score == null) {
@@ -619,7 +622,7 @@ app.post('/api/score', rateLimit(10, 60000), (req, res) => {
       return res.status(403).json({ error: 'Invalid session' });
     }
 
-    const validation = validateScore(session, { score, level, coins_earned, frames, duration, signature, shieldUsed, adContinueUsed });
+    const validation = validateScore(session, { score, level, coins_earned, frames, duration, signature, shieldUsed, adContinueUsed, scoreMultiplier });
 
     if (!validation.valid) {
       console.log(`🚫 Score REJECTED [${telegram_id}]: score=${score} reason=${validation.reason || validation.issues.join(',')}`);
