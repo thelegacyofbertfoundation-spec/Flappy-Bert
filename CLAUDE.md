@@ -76,7 +76,7 @@ No manual deploy step needed. Render builds from Dockerfile.
 - **Telegram initData HMAC validation** — verifies player identity server-side using BOT_TOKEN
 - **Anti-tamper properties** — `gravity`, `flapForce`, `baseSpeed`, `basePipeGap`, `pipeWidth`, `scoreMultiplier`, `gameSpeed`, `pipeGap`, `score`, `coins`, `combo`, `bestCombo`, `_scoreAccum` all locked with `Object.defineProperty`
 - **Game sessions** — server-issued session IDs, reuse detection
-- **Score validation** — hard cap (500), time-based rate checks, sessionless rejection (>30), too-fast rejection (>15)
+- **Score validation** — hard cap (500), time-based rate checks (scaled by scoreMultiplier: base 2.5/sec × mult), sessionless rejection (>30), too-fast rejection (>15). Frontend sends `scoreMultiplier` in score payload; server only accepts 1, 1.5, or 2.
 - **Rate limiting** — per-IP: sessions 10/min, scores 10/min, shares 5/min
 - **Player bans** — admin command, checked on score submission
 
