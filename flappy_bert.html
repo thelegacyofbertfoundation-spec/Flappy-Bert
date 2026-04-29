@@ -3118,7 +3118,7 @@ async function hydrateTournaments() {
       const data = await featuredRes.json();
       FEATURED_TOURNAMENT = data.tournament || null;
     }
-  } catch(e) { /* network error: leave defaults */ }
+  } catch(e) { console.warn('hydrateTournaments failed:', e); }
   updateTournamentUI();
 }
 
@@ -3151,16 +3151,25 @@ function updateTournamentUI() {
   const now = Date.now();
   let icon, color, statusText, pulseAnim;
 
-  if (t.featured_state === 'live') {
+  const startMs = Date.parse(t.startTime);
+  const endMs = Date.parse(t.endTime);
+
+  // Optimistic state correction: if server said one state but the local clock
+  // has passed a boundary, render the next state instead. Re-hydrates next poll.
+  let effectiveState = t.featured_state;
+  if (effectiveState === 'live' && now > endMs) effectiveState = 'recently_ended';
+  else if (effectiveState === 'upcoming' && now >= startMs) effectiveState = 'live';
+
+  if (effectiveState === 'live') {
     icon = '\u{1F3C6}';
     color = '#ffd700';
     pulseAnim = 'pulse 2s infinite';
-    statusText = '\u{1F534} ENDS IN ' + getCountdownString(Date.parse(t.endTime), now);
-  } else if (t.featured_state === 'upcoming') {
+    statusText = '\u{1F534} ENDS IN ' + getCountdownString(endMs, now);
+  } else if (effectiveState === 'upcoming') {
     icon = '\u{23F3}';
     color = '#c0c0c0';
     pulseAnim = 'none';
-    statusText = 'STARTS IN ' + getCountdownString(Date.parse(t.startTime), now);
+    statusText = 'STARTS IN ' + getCountdownString(startMs, now);
   } else {
     icon = '\u{1F4DC}';
     color = '#cd7f32';
@@ -3178,72 +3187,25 @@ function updateTournamentUI() {
 
 setInterval(updateTournamentUI, 1000);
 setInterval(hydrateTournaments, 5 * 60 * 1000);
-hydrateTournaments();
 
+// LEGACY STUBS — Task 10 will fully replace these. For now they no-op so the
+// menu button (onclick="showTournament()") and finalGameOver (submitTournamentScore call)
+// don't ReferenceError on the deleted TOURNAMENT const.
+function getTournamentStatus() { return FEATURED_TOURNAMENT?.featured_state === 'live' ? 'live' : 'ended'; }
+function getTournamentCountdown() { return ''; }
 async function showTournament() {
   hideAllOverlays();
   showOverlay('tournamentOverlay');
-  
-  const statusEl = document.getElementById('tournamentStatusOverlay');
-  const status = getTournamentStatus();
-  if (status === 'live') {
-    statusEl.innerHTML = '\u{1F534} <span style="color:#44d62c">LIVE</span> — ' + getTournamentCountdown();
-  } else if (status === 'scheduled') {
-    statusEl.innerHTML = '\u{23F3} ' + getTournamentCountdown();
-    statusEl.style.color = '#7a7e9a';
-  } else {
-    statusEl.innerHTML = '\u{1F3C1} <span style="color:#7a7e9a">Tournament ended — Final standings</span>';
-  }
-  
-  // Fetch tournament leaderboard from server
-  const listEl = document.getElementById('tournamentList');
-  listEl.innerHTML = '<div style="text-align:center;color:var(--text-dim);font-size:7px;padding:20px">Loading...</div>';
-  
-  try {
-    const res = await fetch((API_BASE || '') + '/api/tournament/' + TOURNAMENT.id);
-    const data = await res.json();
-    renderTournamentLeaderboard(data.entries || []);
-  } catch(e) {
-    listEl.innerHTML = '<div style="text-align:center;color:var(--text-dim);font-size:7px;padding:20px">Could not load leaderboard</div>';
-  }
 }
-
-function renderTournamentLeaderboard(entries) {
-  const listEl = document.getElementById('tournamentList');
-  const user = getTelegramUser();
-  
-  if (entries.length === 0) {
-    listEl.innerHTML = '<div style="text-align:center;color:var(--text-dim);font-size:7px;padding:20px">No scores yet — be the first!</div>';
-    return;
-  }
-  
-  let html = '';
-  entries.forEach((e, i) => {
-    const rank = i + 1;
-    const isYou = user && e.telegram_id === user.id;
-    const medal = rank === 1 ? '\u{1F947}' : (rank === 2 ? '\u{1F948}' : (rank === 3 ? '\u{1F949}' : '#' + rank));
-    const bg = isYou ? 'rgba(255,215,0,0.15)' : (rank <= 3 ? 'rgba(255,215,0,0.06)' : 'rgba(255,255,255,0.03)');
-    const border = isYou ? 'border:1px solid rgba(255,215,0,0.4);' : '';
-    const nameColor = isYou ? '#ffd700' : '#e8e8f0';
-    const name = (isYou ? '\u{25B6} ' : '') + (e.first_name || e.username || 'Player');
-    
-    html += `<div style="display:flex;align-items:center;padding:6px 8px;margin:3px 0;border-radius:6px;background:${bg};${border}">`;
-    html += `<div style="width:28px;text-align:center;font-size:${rank<=3?'12px':'8px'};flex-shrink:0">${medal}</div>`;
-    html += `<div style="flex:1;font-size:8px;color:${nameColor};margin-left:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</div>`;
-    html += `<div style="font-size:10px;font-weight:bold;color:#ffd700;margin-left:8px">${e.best_score}</div>`;
-    html += `<div style="font-size:7px;color:#7a7e9a;margin-left:8px;width:20px;text-align:right">${e.games_played}g</div>`;
-    html += '</div>';
-  });
-  
-  listEl.innerHTML = html;
-}
-
+function renderTournamentLeaderboard(_entries) { /* will be replaced in Task 10 */ }
 async function submitTournamentScore(score, level, coinsEarned) {
   if (getTournamentStatus() !== 'live') return;
+  const live = ALL_TOURNAMENTS.find(t => t.status === 'live');
+  if (!live) return;
   const user = getTelegramUser();
   if (!user) return;
   try {
-    await fetch((API_BASE || '') + '/api/tournament/' + TOURNAMENT.id + '/score', {
+    await fetch((API_BASE || '') + '/api/tournament/' + encodeURIComponent(live.id) + '/score', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -3495,6 +3457,9 @@ function showToast(msg, type = 'info') {
 
 // ========== TELEGRAM & API INTEGRATION ==========
 const API_BASE = ''; // Set to your server URL after deploy, e.g. 'https://your-server.com'
+
+// Bootstrap tournaments now that API_BASE is initialized (avoids TDZ).
+hydrateTournaments();
 
 let _gameSession = null;
 let _gameStartTime = 0;
