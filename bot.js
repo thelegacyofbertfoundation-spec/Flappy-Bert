@@ -658,7 +658,7 @@ app.post('/api/score', rateLimit(10, 60000), (req, res) => {
       return res.status(403).json({ error: 'Invalid session' });
     }
 
-    const validation = validateScore(session, { score, level, coins_earned, frames, duration, signature, shieldUsed, adContinueUsed, scoreMultiplier });
+    const validation = validateScore(session, { score, level, coins_earned, duration, shieldUsed, adContinueUsed, scoreMultiplier });
 
     if (!validation.valid) {
       console.log(`🚫 Score REJECTED [${telegram_id}]: score=${score} reason=${validation.reason || validation.issues.join(',')}`);
