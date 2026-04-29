@@ -878,6 +878,7 @@ app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }
 
 // Serve the game HTML from the same directory
 app.get('/game', (req, res) => {
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.sendFile(path.join(__dirname, 'flappy_bert.html'));
 });
 
