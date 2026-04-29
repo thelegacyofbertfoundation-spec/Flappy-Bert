@@ -137,3 +137,23 @@ test('getFeaturedTournament: handles April→May handoff at midnight UTC', () =>
   assert.equal(result.id, 'may');
   assert.equal(result.featured_state, 'live');
 });
+
+test('getFeaturedTournament: when multiple upcoming<7d, returns the soonest-start', () => {
+  const tournaments = [
+    T('later-upcoming',  '2026-05-06T00:00:00Z', '2026-05-31T23:59:59Z'),
+    T('sooner-upcoming', '2026-05-03T00:00:00Z', '2026-05-30T23:59:59Z'),
+  ];
+  const result = getFeaturedTournament(tournaments, new Date('2026-05-01T12:00:00Z'));
+  assert.equal(result.id, 'sooner-upcoming');
+  assert.equal(result.featured_state, 'upcoming');
+});
+
+test('getFeaturedTournament: when multiple recently_ended<14d, returns the most-recently-ended', () => {
+  const tournaments = [
+    T('older-ended', '2026-04-01T00:00:00Z', '2026-04-25T23:59:59Z'),
+    T('newer-ended', '2026-04-05T00:00:00Z', '2026-04-30T23:59:59Z'),
+  ];
+  const result = getFeaturedTournament(tournaments, new Date('2026-05-05T12:00:00Z'));
+  assert.equal(result.id, 'newer-ended');
+  assert.equal(result.featured_state, 'recently_ended');
+});
