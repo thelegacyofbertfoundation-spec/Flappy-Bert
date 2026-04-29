@@ -589,9 +589,13 @@ bot.on('callback_query', async (query) => {
 //  REST API — so the Mini App can submit scores directly via HTTP
 // ═══════════════════════════════════════════════════════════════════
 
-// Middleware: optional API secret check
+// Middleware: API secret check — fail-closed when API_SECRET is unset so
+// admin endpoints can never be hit by an unauthenticated caller.
 function authMiddleware(req, res, next) {
-  if (API_SECRET && req.headers['x-api-secret'] !== API_SECRET) {
+  if (!API_SECRET) {
+    return res.status(503).json({ error: 'Admin endpoints disabled (API_SECRET not configured)' });
+  }
+  if (req.headers['x-api-secret'] !== API_SECRET) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   next();
