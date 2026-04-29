@@ -12,6 +12,7 @@ function validateTournament(obj) {
   }
   if (Number.isNaN(Date.parse(obj.startTime))) return false;
   if (Number.isNaN(Date.parse(obj.endTime))) return false;
+  if (Date.parse(obj.endTime) <= Date.parse(obj.startTime)) return false;
   return true;
 }
 
@@ -48,4 +49,44 @@ function loadTournamentsFromFile(filepath) {
   return valid;
 }
 
-module.exports = { loadTournamentsFromFile, validateTournament };
+const UPCOMING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const RECENTLY_ENDED_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
+function getFeaturedTournament(tournaments, now) {
+  const t = now instanceof Date ? now : new Date(now);
+  const nowMs = t.getTime();
+
+  let live = null;
+  let upcoming = null;
+  let recentlyEnded = null;
+
+  for (const entry of tournaments) {
+    const startMs = Date.parse(entry.startTime);
+    const endMs = Date.parse(entry.endTime);
+
+    if (nowMs >= startMs && nowMs <= endMs) {
+      if (live === null || startMs > Date.parse(live.startTime)) {
+        live = entry;
+      }
+    } else if (nowMs < startMs) {
+      if (startMs - nowMs <= UPCOMING_WINDOW_MS) {
+        if (upcoming === null || startMs < Date.parse(upcoming.startTime)) {
+          upcoming = entry;
+        }
+      }
+    } else {
+      if (nowMs - endMs <= RECENTLY_ENDED_WINDOW_MS) {
+        if (recentlyEnded === null || endMs > Date.parse(recentlyEnded.endTime)) {
+          recentlyEnded = entry;
+        }
+      }
+    }
+  }
+
+  if (live) return { ...live, featured_state: 'live' };
+  if (upcoming) return { ...upcoming, featured_state: 'upcoming' };
+  if (recentlyEnded) return { ...recentlyEnded, featured_state: 'recently_ended' };
+  return null;
+}
+
+module.exports = { loadTournamentsFromFile, validateTournament, getFeaturedTournament };
