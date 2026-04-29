@@ -3100,74 +3100,85 @@ function renderChallenges() {
 }
 
 // ========== TOURNAMENT SYSTEM ==========
-const TOURNAMENT = {
-  id: 'april-fools-flapoff-2026',
-  name: 'April Fools Flap-off 2026',
-  sponsor: 'Dr. Inker LABS',
-  start: new Date('2026-04-01T00:00:00Z'),
-  end: new Date('2026-04-30T23:59:59Z'),
-};
+let FEATURED_TOURNAMENT = null;
+let ALL_TOURNAMENTS = [];
 
-function getTournamentStatus() {
-  const now = new Date();
-  if (now < TOURNAMENT.start) return 'scheduled';
-  if (now <= TOURNAMENT.end) return 'live';
-  return 'ended';
+async function hydrateTournaments() {
+  const base = API_BASE || '';
+  try {
+    const [allRes, featuredRes] = await Promise.all([
+      fetch(base + '/api/tournaments'),
+      fetch(base + '/api/tournaments/featured'),
+    ]);
+    if (allRes.ok) {
+      const data = await allRes.json();
+      ALL_TOURNAMENTS = data.tournaments || [];
+    }
+    if (featuredRes.ok) {
+      const data = await featuredRes.json();
+      FEATURED_TOURNAMENT = data.tournament || null;
+    }
+  } catch(e) { /* network error: leave defaults */ }
+  updateTournamentUI();
 }
 
-function getTournamentCountdown() {
-  const now = new Date();
-  const status = getTournamentStatus();
-  if (status === 'scheduled') {
-    const diff = TOURNAMENT.start.getTime() - now.getTime();
-    const d = Math.floor(diff / 86400000);
-    const h = Math.floor((diff % 86400000) / 3600000);
-    const m = Math.floor((diff % 3600000) / 60000);
-    const s = Math.floor((diff % 60000) / 1000);
-    if (d > 0) return `Starts in ${d}d ${h}h ${m}m`;
-    return `Starts in ${h}h ${m}m ${s}s`;
-  }
-  if (status === 'live') {
-    const diff = TOURNAMENT.end.getTime() - now.getTime();
-    const d = Math.floor(diff / 86400000);
-    const h = Math.floor((diff % 86400000) / 3600000);
-    const m = Math.floor((diff % 3600000) / 60000);
-    if (d > 0) return `LIVE — ${d}d ${h}h remaining`;
-    return `LIVE — Ends in ${h}h ${m}m`;
-  }
-  return 'Tournament ended';
+function getCountdownString(targetMs, fromMs) {
+  const diff = targetMs - fromMs;
+  if (diff <= 0) return '0d 0h 0m';
+  const d = Math.floor(diff / 86400000);
+  const h = Math.floor((diff % 86400000) / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  const s = Math.floor((diff % 60000) / 1000);
+  if (d > 0) return d + 'd ' + h + 'h ' + m + 'm';
+  return h + 'h ' + m + 'm ' + s + 's';
 }
 
 function updateTournamentUI() {
   const btn = document.getElementById('tournamentBtn');
   const statusEl = document.getElementById('tournamentStatus');
-  const status = getTournamentStatus();
+  if (!btn || !statusEl) return;
 
-  // Always show tournament button with countdown
+  if (!FEATURED_TOURNAMENT) {
+    btn.style.display = 'none';
+    statusEl.style.display = 'none';
+    return;
+  }
+
   btn.style.display = '';
   statusEl.style.display = '';
-  btn.textContent = '\u{1F3DF} ' + TOURNAMENT.name.toUpperCase();
 
-  if (status === 'scheduled') {
-    statusEl.textContent = '\u{23F3} ' + getTournamentCountdown();
-    statusEl.style.color = '#ffd700';
-    btn.style.borderColor = '#ffd700';
-    btn.style.color = '#ffd700';
-  } else if (status === 'live') {
-    statusEl.textContent = '\u{1F534} ' + getTournamentCountdown();
-    statusEl.style.color = '#44d62c';
-    btn.style.borderColor = '#44d62c';
-    btn.style.color = '#44d62c';
+  const t = FEATURED_TOURNAMENT;
+  const now = Date.now();
+  let icon, color, statusText, pulseAnim;
+
+  if (t.featured_state === 'live') {
+    icon = '\u{1F3C6}';
+    color = '#ffd700';
+    pulseAnim = 'pulse 2s infinite';
+    statusText = '\u{1F534} ENDS IN ' + getCountdownString(Date.parse(t.endTime), now);
+  } else if (t.featured_state === 'upcoming') {
+    icon = '\u{23F3}';
+    color = '#c0c0c0';
+    pulseAnim = 'none';
+    statusText = 'STARTS IN ' + getCountdownString(Date.parse(t.startTime), now);
   } else {
-    statusEl.textContent = '\u{1F3C1} Tournament ended';
-    statusEl.style.color = '#7a7e9a';
-    btn.style.borderColor = '#7a7e9a';
-    btn.style.color = '#7a7e9a';
+    icon = '\u{1F4DC}';
+    color = '#cd7f32';
+    pulseAnim = 'none';
+    statusText = 'FINAL RESULTS';
   }
+
+  btn.textContent = icon + ' ' + String(t.name || '').toUpperCase();
+  btn.style.color = color;
+  btn.style.borderColor = color;
+  btn.style.animation = pulseAnim;
+  statusEl.textContent = statusText;
+  statusEl.style.color = color;
 }
 
-// Update tournament UI every second
 setInterval(updateTournamentUI, 1000);
+setInterval(hydrateTournaments, 5 * 60 * 1000);
+hydrateTournaments();
 
 async function showTournament() {
   hideAllOverlays();
