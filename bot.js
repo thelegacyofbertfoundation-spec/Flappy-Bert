@@ -28,6 +28,7 @@ const cors        = require('cors');
 const path        = require('path');
 const crypto    = require('crypto');
 const db          = require('./db');
+const { loadTournamentsFromFile, getFeaturedTournament } = require('./tournaments-config');
 const { renderLeaderboardCard, renderPlayerCard, renderTournamentCard } = require('./leaderboard-card');
 
 // ── Config ──────────────────────────────────────────────────────────
@@ -176,21 +177,13 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-// Seed tournaments
-db.createTournament(
-  'champions-flapoff-1',
-  'Champions Flap-off',
-  'TraderSZ',
-  '2026-02-19T17:00:00Z',
-  '2026-03-19T23:59:59Z'
-);
-db.createTournament(
-  'april-fools-flapoff-2026',
-  'April Fools Flap-off 2026',
-  'Dr. Inker LABS',
-  '2026-04-01T00:00:00Z',
-  '2026-04-30T23:59:59Z'
-);
+// Seed tournaments from config file (idempotent — INSERT OR IGNORE on id)
+const TOURNAMENTS_CONFIG_PATH = path.join(__dirname, 'tournaments.json');
+const seededTournaments = loadTournamentsFromFile(TOURNAMENTS_CONFIG_PATH);
+for (const t of seededTournaments) {
+  db.createTournament(t.id, t.name, t.sponsor, t.startTime, t.endTime);
+}
+console.log(`Loaded ${seededTournaments.length} tournament(s) from config`);
 
 console.log('🐕  Flappy Bert Bot starting…');
 
