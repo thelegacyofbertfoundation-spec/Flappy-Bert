@@ -487,13 +487,26 @@ html, body {
 <!-- Letterbox background for landscape/desktop -->
 <div id="letterboxBg" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#030508;z-index:-1"></div>
 
-<!-- Tournament Leaderboard -->
+<!-- Tournament Leaderboard / Archive -->
 <div class="overlay" id="tournamentOverlay">
-  <div class="shop-panel" style="border-color:#ffd700">
-    <div class="shop-title" style="color:#ffd700">&#x1F3DF; CHAMPIONS FLAP-OFF</div>
-    <div style="font-size:clamp(5px,1.2vw,7px);color:#00e5ff;margin:-8px 0 8px;letter-spacing:1px">Sponsored by TraderSZ</div>
-    <div id="tournamentStatusOverlay" style="font-size:clamp(5px,1.2vw,7px);margin-bottom:8px"></div>
-    <div id="tournamentList" style="max-height:50vh;overflow-y:auto"></div>
+  <div class="shop-panel" style="border-color:#ffd700;max-height:90vh;overflow-y:auto">
+    <div class="shop-title" style="color:#ffd700">&#x1F3DF; TOURNAMENTS</div>
+
+    <div id="tournamentSectionLive" style="display:none;margin-top:8px">
+      <div style="font-size:clamp(6px,1.4vw,8px);color:#ff4d4d;letter-spacing:2px;margin-bottom:6px">&#x1F534; LIVE</div>
+      <div id="tournamentLiveBody"></div>
+    </div>
+
+    <div id="tournamentSectionUpcoming" style="display:none;margin-top:14px">
+      <div style="font-size:clamp(6px,1.4vw,8px);color:#c0c0c0;letter-spacing:2px;margin-bottom:6px">&#x23F3; UPCOMING</div>
+      <div id="tournamentUpcomingBody"></div>
+    </div>
+
+    <div id="tournamentSectionPast" style="display:none;margin-top:14px">
+      <div style="font-size:clamp(6px,1.4vw,8px);color:#cd7f32;letter-spacing:2px;margin-bottom:6px">&#x1F4DC; PAST</div>
+      <div id="tournamentPastBody"></div>
+    </div>
+
     <button class="btn btn-secondary" style="margin-top:12px" onclick="hideAllOverlays();showOverlay('menuOverlay')">&#x2190; BACK</button>
   </div>
 </div>
@@ -3188,18 +3201,184 @@ function updateTournamentUI() {
 setInterval(updateTournamentUI, 1000);
 setInterval(hydrateTournaments, 5 * 60 * 1000);
 
-// LEGACY STUBS — Task 10 will fully replace these. For now they no-op so the
-// menu button (onclick="showTournament()") and finalGameOver (submitTournamentScore call)
-// don't ReferenceError on the deleted TOURNAMENT const.
+// Retained helpers — `getTournamentStatus` is still called from `finalGameOver`
+// (line ~1602) for the gameover "SCORE SUBMITTED" pill. `getTournamentCountdown`
+// is kept for symmetry / external callers; safe no-op.
 function getTournamentStatus() { return FEATURED_TOURNAMENT?.featured_state === 'live' ? 'live' : 'ended'; }
 function getTournamentCountdown() { return ''; }
-async function showTournament() {
+
+async function showTournament(scrollToPast) {
   hideAllOverlays();
   showOverlay('tournamentOverlay');
+  if (ALL_TOURNAMENTS.length === 0) await hydrateTournaments();
+  renderTournamentSections();
+  if (scrollToPast) {
+    const past = document.getElementById('tournamentSectionPast');
+    if (past) past.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
 }
-function renderTournamentLeaderboard(_entries) { /* will be replaced in Task 10 */ }
+
+function renderTournamentSections() {
+  const live = ALL_TOURNAMENTS.filter(t => t.status === 'live');
+  const upcoming = ALL_TOURNAMENTS.filter(t => t.status === 'scheduled')
+    .sort((a, b) => Date.parse(a.start_time) - Date.parse(b.start_time));
+  const past = ALL_TOURNAMENTS.filter(t => t.status === 'ended')
+    .sort((a, b) => Date.parse(b.end_time) - Date.parse(a.end_time));
+
+  renderLiveSection(live);
+  renderUpcomingSection(upcoming);
+  renderPastSection(past);
+}
+
+function _makeEl(tag, opts) {
+  const el = document.createElement(tag);
+  if (opts && opts.style) el.setAttribute('style', opts.style);
+  if (opts && opts.text != null) el.textContent = opts.text;
+  if (opts && opts.cls) el.className = opts.cls;
+  return el;
+}
+
+function _tournamentCard(t, accentColor, bgColor) {
+  const card = _makeEl('div', { style: 'background:' + bgColor + ';border:1px solid ' + accentColor + ';border-radius:8px;padding:10px;margin-bottom:8px' });
+  const name = _makeEl('div', { style: 'font-size:clamp(8px,1.8vw,11px);color:' + accentColor, text: t.name || '' });
+  const sponsor = _makeEl('div', { style: 'font-size:clamp(5px,1.2vw,7px);color:#00e5ff;margin-top:2px', text: 'Sponsored by ' + (t.sponsor || '') });
+  card.appendChild(name);
+  card.appendChild(sponsor);
+  return card;
+}
+
+function renderLiveSection(tournaments) {
+  const section = document.getElementById('tournamentSectionLive');
+  const body = document.getElementById('tournamentLiveBody');
+  body.replaceChildren();
+  if (tournaments.length === 0) { section.style.display = 'none'; return; }
+  section.style.display = '';
+
+  tournaments.forEach(t => {
+    const card = _tournamentCard(t, '#ffd700', 'rgba(255,77,77,0.08)');
+    card.style.borderColor = 'rgba(255,77,77,0.3)';
+    const list = _makeEl('div', { style: 'margin-top:8px;max-height:40vh;overflow-y:auto' });
+    const loading = _makeEl('div', { style: 'text-align:center;color:var(--text-dim);font-size:7px;padding:12px', text: 'Loading…' });
+    list.appendChild(loading);
+    card.appendChild(list);
+    body.appendChild(card);
+    fetchAndRenderEntries(t.id, list);
+  });
+}
+
+function renderUpcomingSection(tournaments) {
+  const section = document.getElementById('tournamentSectionUpcoming');
+  const body = document.getElementById('tournamentUpcomingBody');
+  body.replaceChildren();
+  if (tournaments.length === 0) { section.style.display = 'none'; return; }
+  section.style.display = '';
+
+  const now = Date.now();
+  tournaments.forEach(t => {
+    const card = _tournamentCard(t, '#c0c0c0', 'rgba(192,192,192,0.06)');
+    card.style.borderColor = 'rgba(192,192,192,0.3)';
+    const startMs = Date.parse(t.start_time);
+    const countdown = _makeEl('div', { style: 'font-size:clamp(6px,1.4vw,8px);color:#ffd700;margin-top:6px', text: 'Starts in ' + getCountdownString(startMs, now) });
+    card.appendChild(countdown);
+    body.appendChild(card);
+  });
+}
+
+const _expandedPast = new Set();
+
+function renderPastSection(tournaments) {
+  const section = document.getElementById('tournamentSectionPast');
+  const body = document.getElementById('tournamentPastBody');
+  body.replaceChildren();
+  if (tournaments.length === 0) { section.style.display = 'none'; return; }
+  section.style.display = '';
+
+  tournaments.forEach(t => {
+    const card = _makeEl('div', { style: 'background:rgba(205,127,50,0.06);border:1px solid rgba(205,127,50,0.3);border-radius:8px;padding:10px;margin-bottom:8px' });
+
+    const header = _makeEl('div', { style: 'display:flex;align-items:center;justify-content:space-between;cursor:pointer' });
+    const left = _makeEl('div');
+    const name = _makeEl('div', { style: 'font-size:clamp(8px,1.8vw,11px);color:#cd7f32', text: t.name || '' });
+    const sponsor = _makeEl('div', { style: 'font-size:clamp(5px,1.2vw,7px);color:#7a7e9a;margin-top:2px', text: 'Sponsored by ' + (t.sponsor || '') });
+    left.appendChild(name);
+    left.appendChild(sponsor);
+    const toggle = _makeEl('div', { style: 'font-size:14px;color:#cd7f32', text: '▼' });
+    header.appendChild(left);
+    header.appendChild(toggle);
+
+    const list = _makeEl('div', { style: 'margin-top:8px;max-height:40vh;overflow-y:auto;display:none' });
+    const loading = _makeEl('div', { style: 'text-align:center;color:var(--text-dim);font-size:7px;padding:12px', text: 'Loading…' });
+    list.appendChild(loading);
+
+    header.addEventListener('click', () => {
+      if (_expandedPast.has(t.id)) {
+        list.style.display = 'none';
+        toggle.textContent = '▼';
+        _expandedPast.delete(t.id);
+      } else {
+        list.style.display = '';
+        toggle.textContent = '▲';
+        _expandedPast.add(t.id);
+        fetchAndRenderEntries(t.id, list);
+      }
+    });
+
+    card.appendChild(header);
+    card.appendChild(list);
+    body.appendChild(card);
+  });
+}
+
+async function fetchAndRenderEntries(tournamentId, listEl) {
+  if (!listEl) return;
+  try {
+    const res = await fetch((API_BASE || '') + '/api/tournament/' + encodeURIComponent(tournamentId));
+    if (!res.ok) throw new Error('http ' + res.status);
+    const data = await res.json();
+    renderEntriesInto(listEl, data.entries || []);
+  } catch(e) {
+    listEl.replaceChildren();
+    listEl.appendChild(_makeEl('div', {
+      style: 'text-align:center;color:var(--text-dim);font-size:7px;padding:12px',
+      text: 'Could not load leaderboard',
+    }));
+  }
+}
+
+function renderEntriesInto(listEl, entries) {
+  const user = getTelegramUser();
+  listEl.replaceChildren();
+  if (entries.length === 0) {
+    listEl.appendChild(_makeEl('div', {
+      style: 'text-align:center;color:var(--text-dim);font-size:7px;padding:12px',
+      text: 'No scores yet',
+    }));
+    return;
+  }
+  entries.forEach((e, i) => {
+    const rank = i + 1;
+    const isYou = user && e.telegram_id === user.id;
+    const medal = rank === 1 ? '\u{1F947}' : (rank === 2 ? '\u{1F948}' : (rank === 3 ? '\u{1F949}' : '#' + rank));
+    const bg = isYou ? 'rgba(255,215,0,0.15)' : (rank <= 3 ? 'rgba(255,215,0,0.06)' : 'rgba(255,255,255,0.03)');
+    const border = isYou ? 'border:1px solid rgba(255,215,0,0.4);' : '';
+    const nameColor = isYou ? '#ffd700' : '#e8e8f0';
+    const displayName = (isYou ? '▶ ' : '') + (e.first_name || e.username || 'Player');
+
+    const row = _makeEl('div', { style: 'display:flex;align-items:center;padding:6px 8px;margin:3px 0;border-radius:6px;background:' + bg + ';' + border });
+    const medalEl = _makeEl('div', { style: 'width:28px;text-align:center;font-size:' + (rank<=3?'12px':'8px') + ';flex-shrink:0', text: medal });
+    const nameEl = _makeEl('div', { style: 'flex:1;font-size:8px;color:' + nameColor + ';margin-left:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', text: displayName });
+    const scoreEl = _makeEl('div', { style: 'font-size:10px;font-weight:bold;color:#ffd700;margin-left:8px', text: String(e.best_score) });
+    const gamesEl = _makeEl('div', { style: 'font-size:7px;color:#7a7e9a;margin-left:8px;width:20px;text-align:right', text: String(e.games_played) + 'g' });
+
+    row.appendChild(medalEl);
+    row.appendChild(nameEl);
+    row.appendChild(scoreEl);
+    row.appendChild(gamesEl);
+    listEl.appendChild(row);
+  });
+}
+
 async function submitTournamentScore(score, level, coinsEarned) {
-  if (getTournamentStatus() !== 'live') return;
   const live = ALL_TOURNAMENTS.find(t => t.status === 'live');
   if (!live) return;
   const user = getTelegramUser();
