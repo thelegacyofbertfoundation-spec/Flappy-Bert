@@ -759,6 +759,20 @@ app.get('/api/tournaments', (req, res) => {
   res.json({ tournaments });
 });
 
+// GET /api/tournaments/featured — Returns the single featured tournament
+// for the home-screen button, or null if none qualify.
+app.get('/api/tournaments/featured', (req, res) => {
+  const all = db.getAllTournaments().map(t => ({
+    id: t.id,
+    name: t.name,
+    sponsor: t.sponsor,
+    startTime: t.start_time,
+    endTime: t.end_time,
+  }));
+  const featured = getFeaturedTournament(all, new Date());
+  res.json({ tournament: featured });
+});
+
 // GET /api/tournament/:id — Tournament info + leaderboard
 app.get('/api/tournament/:id', (req, res) => {
   const t = db.getTournament(req.params.id);
