@@ -1,3 +1,4 @@
 .worktrees/
 node_modules/
 flappy_bert.db*
+.superpowers/
