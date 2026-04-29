@@ -394,11 +394,23 @@ bot.onText(/\/unban(?:\s+(\d+))?/, (msg, match) => {
 
 bot.onText(/\/resettournament/, (msg) => {
   if (!ADMIN_IDS.includes(msg.from.id)) return;
-  
+
   try {
-    db.resetTournamentScores('april-fools-flapoff-2026');
-    bot.sendMessage(msg.chat.id, '🗑 All tournament scores wiped. Tournament continues with a clean leaderboard.', { parse_mode: 'Markdown' });
-    console.log(`🗑 Admin ${msg.from.id} reset tournament scores`);
+    // Reset the live tournament if one exists, else most-recently-ended
+    const allTourneys = db.getAllTournaments();
+    const now = new Date();
+    const live = allTourneys.find(t => new Date(t.start_time) <= now && now <= new Date(t.end_time));
+    const recentEnded = allTourneys
+      .filter(t => now > new Date(t.end_time))
+      .sort((a, b) => new Date(b.end_time) - new Date(a.end_time))[0];
+    const target = live || recentEnded;
+    if (!target) {
+      bot.sendMessage(msg.chat.id, '🏟 No tournament to reset.');
+      return;
+    }
+    db.resetTournamentScores(target.id);
+    bot.sendMessage(msg.chat.id, `🗑 Tournament scores wiped for *${target.name}*.`, { parse_mode: 'Markdown' });
+    console.log(`🗑 Admin ${msg.from.id} reset tournament scores for ${target.id}`);
   } catch(err) {
     bot.sendMessage(msg.chat.id, '❌ Error: ' + err.message);
   }
@@ -428,29 +440,60 @@ bot.onText(/\/history/, async (msg) => {
   }
 });
 
-// ── /tournament — show tournament leaderboard ────────────────────────
-bot.onText(/\/tournament/, async (msg) => {
+// ── /tournament [keyword] — show tournament card (defaults to live, else most-recent-ended)
+bot.onText(/^\/tournament(?:\s+(.+))?$/, async (msg, match) => {
   const chatId = msg.chat.id;
+  const arg = (match && match[1] || '').trim().toLowerCase();
   const tournaments = db.getAllTournaments();
-  
+
   if (tournaments.length === 0) {
     bot.sendMessage(chatId, '🏟 No tournaments yet. Stay tuned!');
     return;
   }
-  
-  // Show the most recent tournament
-  const t = tournaments[0];
+
+  const withStatus = tournaments.map(t => {
+    const now = new Date();
+    const start = new Date(t.start_time);
+    const end = new Date(t.end_time);
+    let status = 'ended';
+    if (now < start) status = 'scheduled';
+    else if (now <= end) status = 'live';
+    return { ...t, status };
+  });
+
+  let chosen;
+  if (arg) {
+    const matches = withStatus.filter(t =>
+      t.id.toLowerCase().includes(arg) ||
+      t.name.toLowerCase().includes(arg)
+    );
+    if (matches.length === 0) {
+      bot.sendMessage(chatId, `🏟 No tournament matching "${arg}". Try /tournament with no args.`);
+      return;
+    }
+    if (matches.length > 1) {
+      const list = matches.map(t => `• ${t.name} (${t.id})`).join('\n');
+      bot.sendMessage(chatId, `🏟 Multiple matches:\n${list}\n\nTry a more specific keyword.`);
+      return;
+    }
+    chosen = matches[0];
+  } else {
+    chosen = withStatus.find(t => t.status === 'live')
+      || withStatus.filter(t => t.status === 'ended').sort((a, b) => new Date(b.end_time) - new Date(a.end_time))[0]
+      || withStatus[0];
+  }
+
+  // Build a human-readable status string for the card overlay + caption.
   const now = new Date();
-  const start = new Date(t.start_time);
-  const end = new Date(t.end_time);
-  
+  const start = new Date(chosen.start_time);
+  const end = new Date(chosen.end_time);
   let statusText;
-  if (now < start) {
+  if (chosen.status === 'scheduled') {
     const diff = start.getTime() - now.getTime();
     const h = Math.floor(diff / 3600000);
     const m = Math.floor((diff % 3600000) / 60000);
     statusText = `⏳ Starts in ${h}h ${m}m`;
-  } else if (now <= end) {
+  } else if (chosen.status === 'live') {
     const diff = end.getTime() - now.getTime();
     const h = Math.floor(diff / 3600000);
     const m = Math.floor((diff % 3600000) / 60000);
@@ -458,28 +501,28 @@ bot.onText(/\/tournament/, async (msg) => {
   } else {
     statusText = '🏁 Tournament ended';
   }
-  
+
   try {
-    const entries = db.getTournamentLeaderboard(t.id, 50);
+    const entries = db.getTournamentLeaderboard(chosen.id, 50);
     const pngBuffer = renderTournamentCard(entries, {
-      name: t.name,
-      sponsor: t.sponsor,
+      name: chosen.name,
+      sponsor: chosen.sponsor,
       status: statusText,
       highlightId: msg.from.id,
     });
-    
-    const rank = db.getTournamentPlayerRank(t.id, msg.from.id);
+
+    const rank = db.getTournamentPlayerRank(chosen.id, msg.from.id);
     const rankText = rank ? `\n🏅 Your rank: #${rank}` : '';
-    
+
     await bot.sendPhoto(chatId, pngBuffer, {
-      caption: `🏟 *${t.name}*\nSponsored by ${t.sponsor}\n\n${statusText}${rankText}\n\nUse /play to compete!`,
+      caption: `🏟 *${chosen.name}*\nSponsored by ${chosen.sponsor}\n\n${statusText}${rankText}\n\nUse /play to compete!`,
       parse_mode: 'Markdown',
     }, {
       filename: 'tournament.png',
       contentType: 'image/png',
     });
   } catch (err) {
-    console.error('Tournament error:', err);
+    console.error('Tournament card render failed:', err.message);
     bot.sendMessage(chatId, '❌ Failed to generate tournament leaderboard.');
   }
 });
