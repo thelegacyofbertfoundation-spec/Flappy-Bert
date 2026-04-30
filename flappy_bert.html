@@ -940,7 +940,21 @@ const AudioSystem = {
     }
     return osc;
   },
-  
+
+  // ADSR envelope helper. peak: target gain at end of attack; sustain: gain held during hold (relative).
+  // Returns the gainNode for chaining.
+  _adsr(gainNode, { attack = 5, decay = 30, sustain = 0.4, release = 100, peak = 0.2 } = {}) {
+    if (!this.ctx) return gainNode;
+    const t = this.ctx.currentTime;
+    const aS = attack / 1000, dS = decay / 1000, rS = release / 1000;
+    gainNode.gain.cancelScheduledValues(t);
+    gainNode.gain.setValueAtTime(0.0001, t);
+    gainNode.gain.linearRampToValueAtTime(peak, t + aS);
+    gainNode.gain.linearRampToValueAtTime(peak * sustain, t + aS + dS);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, t + aS + dS + rS);
+    return gainNode;
+  },
+
   // Play flap sound effect
   playFlap() {
     if (!this.ctx) return;
