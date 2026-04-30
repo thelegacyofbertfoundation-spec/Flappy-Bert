@@ -32,7 +32,7 @@ No manual deploy step needed. Render builds from Dockerfile.
 - `BOT_TOKEN` — Telegram bot token (required)
 - `WEBAPP_URL` — Public URL where the game HTML is hosted
 - `PORT` — HTTP port (default 3000)
-- `API_SECRET` — Optional shared secret for admin endpoints
+- `API_SECRET` — Required for admin endpoints. If unset, `/api/admin/*` and `/api/archive-now` return 503 (fail-closed since 2026-04-29). Set in Render dashboard with a long random value (e.g. `openssl rand -hex 32`).
 - `ADMIN_IDS` — Comma-separated Telegram user IDs for admin commands
 
 ## Bot commands
