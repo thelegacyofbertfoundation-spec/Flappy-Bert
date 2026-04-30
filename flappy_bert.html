@@ -1160,6 +1160,15 @@ const AudioSystem = {
     this._chord([523, 659, 784, 1046], 'square', 700, 0.06, { reverb: true });
   },
 
+  fxJeetSpawn() {
+    this._sweep(180, 80, 150, 'sawtooth', 0.16);
+    this._noiseBurst(150, 400, 0.08);
+  },
+
+  fxJeetDodge() {
+    this._noiseBurst(200, 350, 0.10);
+  },
+
   // Play death sound
   playDeath() {
     if (!this.ctx) return;
@@ -1363,6 +1372,21 @@ const FX = {
       banner.style.display = 'block';
       setTimeout(() => { banner.style.display = 'none'; }, 1200);
     }
+  },
+
+  jeetWarnings: [],
+
+  jeetSpawn(x, y) {
+    AudioSystem.fxJeetSpawn();
+    this.jeetWarnings.push({ y, life: 12, maxLife: 12 });
+  },
+
+  jeetDodge(x, y) {
+    AudioSystem.fxJeetDodge();
+    this._spawnParticles({
+      x, y, count: 4, speed: 4, life: 24,
+      color: '#222', size: 3,
+    });
   },
 };
 
@@ -1753,6 +1777,7 @@ function addPipe() {
       vyDrift: (Math.random() - 0.5) * 0.4,        // slight vertical drift
       nextDirChange: 60 + Math.floor(Math.random() * 120), // frames until direction shift
     });
+    FX.jeetSpawn(G.width + 20, y);
   } else if (G.level >= 2) {
     G._jeetDrought++;  // no spawn — increase chance for next pipe
   }
@@ -2460,8 +2485,9 @@ function update() {
     e.y = e.baseY + Math.sin(e.age * e.freq) * e.amplitude
          + Math.sin(e.age * (e.freq2 || 0.01)) * (e.amp2 || 0);
 
-    // Remove off-screen
+    // Remove off-screen — JEET passed Bert without collision = dodge!
     if (e.x < -30 * (e.scale || 1)) {
+      FX.jeetDodge(e.x, e.y);
       G.enemies.splice(i, 1);
       continue;
     }
@@ -2673,6 +2699,25 @@ function render() {
       }
     }
     
+    // JEET spawn warnings (right edge red triangles, fading)
+    if (FX.jeetWarnings && FX.jeetWarnings.length) {
+      for (let i = FX.jeetWarnings.length - 1; i >= 0; i--) {
+        const w = FX.jeetWarnings[i];
+        w.life--;
+        if (w.life <= 0) { FX.jeetWarnings.splice(i, 1); continue; }
+        ctx.save();
+        ctx.globalAlpha = (w.life / w.maxLife) * 0.85;
+        ctx.fillStyle = '#ff3344';
+        ctx.beginPath();
+        ctx.moveTo(G.width - 20, w.y);
+        ctx.lineTo(G.width - 4, w.y - 8);
+        ctx.lineTo(G.width - 4, w.y + 8);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
     // Enemies
     for (const e of G.enemies) {
       ctx.save();
