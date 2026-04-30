@@ -1173,6 +1173,17 @@ const AudioSystem = {
     this._noiseBurst(200, 350, 0.10);
   },
 
+  fxMagnetPickup() {
+    this._sweep(220, 880, 250, 'sine', 0.20, { reverb: true });
+    this._noiseBurst(80, 1600, 0.10);
+  },
+  fxMagnetActivate() {
+    this._chord([440, 660, 880], 'triangle', 300, 0.07, { reverb: true });
+  },
+  fxMagnetExpire() {
+    this._sweep(880, 220, 350, 'sine', 0.14);
+  },
+
   // Play death sound
   playDeath() {
     if (!this.ctx) return;
@@ -1393,7 +1404,24 @@ const FX = {
     });
   },
 
+  magnetPickup(x, y) {
+    AudioSystem.fxMagnetPickup();
+    this.shockwave = { x, y, t: 0, max: 250, color: '#c04dff' };
+    this._flash(0.2, '#c04dff');
+    this._spawnParticles({
+      x, y, count: 12, speed: 6, life: 30,
+      color: '#c04dff', size: 3, glow: true,
+    });
+  },
+
+  magnetActivate() {
+    AudioSystem.fxMagnetActivate();
+    G.powerups.magnet.active = true;
+    G.powerups.magnet.expiresAt = G.frameCount + MAGNET_DURATION_FRAMES;
+  },
+
   magnetExpire() {
+    AudioSystem.fxMagnetExpire();
     G.powerups.magnet.active = false;
   },
 };
@@ -1742,13 +1770,17 @@ function addPipe() {
     moveOffset: 0,
     hasCoin: false,
     hasShield: false,
+    hasMagnet: false,
     coinCollected: false,
     shieldCollected: false,
+    magnetCollected: false,
   });
 
   const pipe = G.pipes[G.pipes.length - 1];
   const roll = Math.random();
-  if (roll < 0.3) {
+  if (G.level >= 2 && roll < 0.03) {
+    pipe.hasMagnet = true;  // ~3% magnet from level 2+; mutex with coin/shield
+  } else if (roll < 0.3) {
     pipe.hasCoin = true;  // 30% chance coin
   } else if (roll < 0.3 + 0.7 * 0.08 && !G.hasShield && !G.shieldSpawnedThisGame) {
     pipe.hasShield = true;  // ~5.6% effective chance shield
@@ -2476,6 +2508,18 @@ function update() {
       }
     }
 
+    // Magnet pickup
+    if (p.hasMagnet && !p.magnetCollected) {
+      const mx = p.x + G.pipeWidth / 2;
+      const my = p.gapY + p.moveOffset + p.gapH / 2;
+      const dist = Math.hypot(G.bert.x - mx, G.bert.y - my);
+      if (dist < 25) {
+        p.magnetCollected = true;
+        FX.magnetPickup(mx, my);
+        FX.magnetActivate();
+      }
+    }
+
     // Remove off-screen
     if (p.x < -G.pipeWidth - 10) {
       G.pipes.splice(i, 1);
@@ -2713,6 +2757,30 @@ function render() {
         ctx.textBaseline = 'middle';
         ctx.fillText('\u{1F6E1}', sx, sy);
         ctx.restore();
+      }
+      // Draw magnet in pipe gap
+      if (p.hasMagnet && !p.magnetCollected) {
+        const mx = p.x + G.pipeWidth / 2;
+        const my = p.gapY + p.moveOffset + p.gapH / 2;
+        const bobY = my + Math.sin(G.frameCount * 0.08) * 2;
+        // Glow halo (additive)
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.4 + Math.sin(G.frameCount * 0.1) * 0.2;
+        ctx.fillStyle = '#c04dff';
+        ctx.beginPath();
+        ctx.arc(mx, bobY, 18, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        // Pixel horseshoe magnet (red top + silver poles)
+        ctx.fillStyle = '#cc2233';
+        ctx.fillRect(mx - 9, bobY - 9, 18, 8);
+        ctx.fillStyle = '#bbbbbb';
+        ctx.fillRect(mx - 9, bobY - 1, 6, 10);
+        ctx.fillRect(mx + 3, bobY - 1, 6, 10);
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(mx - 9, bobY - 9, 18, 18);
       }
     }
     
