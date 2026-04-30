@@ -379,6 +379,29 @@ html, body {
   50%  { text-shadow: 0 0 12px currentColor, 0 0 4px currentColor; }
   100% { text-shadow: 0 0 0 transparent; }
 }
+.fx-floater {
+  position: fixed;
+  pointer-events: none;
+  font-family: var(--font);
+  font-size: 12px;
+  z-index: 200;
+  transform: translate(-50%, 0);
+  animation: fxFloaterRise 0.9s ease-out forwards;
+}
+.fx-combo-floater {
+  background: linear-gradient(90deg, #ff4d6d, #ffb800, #4dffb8, #4da6ff, #c04dff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 8px rgba(255,255,255,0.6);
+  font-weight: bold;
+}
+@keyframes fxFloaterRise {
+  0%   { opacity: 0; transform: translate(-50%, 0)    scale(0.5); }
+  20%  { opacity: 1; transform: translate(-50%, -10px) scale(1.2); }
+  80%  { opacity: 1; transform: translate(-50%, -50px) scale(1.0); }
+  100% { opacity: 0; transform: translate(-50%, -70px) scale(0.95); }
+}
 
 /* Power indicator */
 .power-bar {
@@ -1092,6 +1115,11 @@ const AudioSystem = {
     this._noiseBurst(60, 800, 0.06);
   },
 
+  fxCombo() {
+    // Three-note ascending arpeggio (root, fifth, octave) with reverb
+    this._chord([523, 784, 1046], 'square', 240, 0.07, { reverb: true });
+  },
+
   // Play death sound
   playDeath() {
     if (!this.ctx) return;
@@ -1223,6 +1251,30 @@ const FX = {
     AudioSystem.fxPipePass();
     // Note: existing code adds score-bump class on #scoreDisplay; we don't
     // duplicate that. The audio swoosh is the new juice for this event.
+  },
+
+  combo(n, x, y) {
+    AudioSystem.fxCombo();
+    // Confetti
+    const palette = ['#ff4d6d', '#ffb800', '#4dffb8', '#4da6ff', '#c04dff', '#ffd700'];
+    for (let i = 0; i < 12; i++) {
+      this._spawnParticles({
+        x, y, count: 1, speed: 6, life: 50,
+        color: palette[i % palette.length], size: 3, glow: true,
+      });
+    }
+    this._comboFloater(n, x, y);
+    this._glowText('coinCount', 300);
+  },
+
+  _comboFloater(n, x, y) {
+    const el = document.createElement('div');
+    el.className = 'fx-floater fx-combo-floater';
+    el.textContent = 'COMBO ×' + n + '!';
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 900);
   },
 };
 
@@ -2220,6 +2272,7 @@ function update() {
           G.coins += comboBonus;
           G.coinsEarned += comboBonus;
           updateCoinDisplay();
+          FX.combo(G.combo, window.innerWidth / 2, window.innerHeight * 0.4);
           G.particles.push({
             x: G.bert.x, y: G.bert.y - 50,
             vx: 0, vy: -1.2,
