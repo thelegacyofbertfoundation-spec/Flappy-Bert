@@ -396,6 +396,12 @@ html, body {
   text-shadow: 0 0 8px rgba(255,255,255,0.6);
   font-weight: bold;
 }
+.fx-near-miss-floater {
+  color: #ffd700;
+  text-shadow: 0 0 10px rgba(255,255,255,0.8);
+  font-size: 14px;
+  font-family: var(--font);
+}
 @keyframes fxFloaterRise {
   0%   { opacity: 0; transform: translate(-50%, 0)    scale(0.5); }
   20%  { opacity: 1; transform: translate(-50%, -10px) scale(1.2); }
@@ -1120,6 +1126,10 @@ const AudioSystem = {
     this._chord([523, 784, 1046], 'square', 240, 0.07, { reverb: true });
   },
 
+  fxNearMiss() {
+    this._sweep(440, 880, 90, 'square', 0.10);
+  },
+
   // Play death sound
   playDeath() {
     if (!this.ctx) return;
@@ -1271,6 +1281,29 @@ const FX = {
     const el = document.createElement('div');
     el.className = 'fx-floater fx-combo-floater';
     el.textContent = 'COMBO ×' + n + '!';
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 900);
+  },
+
+  ghostTrail: [],
+
+  nearMiss(x, y) {
+    AudioSystem.fxNearMiss();
+    this.ghostTrail = [
+      { x: G.bert.x, y: G.bert.y, life: 12, maxLife: 12 },
+      { x: G.bert.x, y: G.bert.y, life: 9,  maxLife: 12 },
+      { x: G.bert.x, y: G.bert.y, life: 6,  maxLife: 12 },
+      { x: G.bert.x, y: G.bert.y, life: 3,  maxLife: 12 },
+    ];
+    this._floater('+3 ⚡', window.innerWidth / 2, window.innerHeight * 0.5, 'fx-near-miss-floater');
+  },
+
+  _floater(text, x, y, extraClass) {
+    const el = document.createElement('div');
+    el.className = 'fx-floater ' + (extraClass || '');
+    el.textContent = text;
     el.style.left = x + 'px';
     el.style.top = y + 'px';
     document.body.appendChild(el);
@@ -2254,6 +2287,7 @@ function update() {
         G.nearMissesToday++;
         G.nearMissesThisGame++;
         updateCoinDisplay();
+        FX.nearMiss(G.bert.x, G.bert.y);
         scoreText = 'CLOSE! +3';
         scoreColor = '#ff3860';
         // Haptic for near-miss
@@ -2937,8 +2971,21 @@ function drawBert(ctx) {
       });
     }
   }
-  
+
   ctx.restore();
+
+  if (FX.ghostTrail && FX.ghostTrail.length) {
+    for (let i = FX.ghostTrail.length - 1; i >= 0; i--) {
+      const g = FX.ghostTrail[i];
+      g.life--;
+      if (g.life <= 0) { FX.ghostTrail.splice(i, 1); continue; }
+      ctx.save();
+      ctx.globalAlpha = (g.life / g.maxLife) * 0.4;
+      ctx.fillStyle = getSkinColor();
+      ctx.fillRect(g.x, g.y, G.bertSize || 20, G.bertSize || 20);
+      ctx.restore();
+    }
+  }
 }
 
 function drawTail(ctx, halfS, size, color, tailAngle) {
