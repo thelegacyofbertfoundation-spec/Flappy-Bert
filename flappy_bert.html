@@ -1130,6 +1130,11 @@ const AudioSystem = {
     this._sweep(440, 880, 90, 'square', 0.10);
   },
 
+  fxShieldHit() {
+    this._noiseBurst(250, 1200, 0.20);          // shatter
+    this._sweep(120, 60, 200, 'sine', 0.18);    // sub thump
+  },
+
   // Play death sound
   playDeath() {
     if (!this.ctx) return;
@@ -1308,6 +1313,19 @@ const FX = {
     el.style.top = y + 'px';
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 900);
+  },
+
+  shockwave: null,
+
+  shieldHit(x, y) {
+    AudioSystem.fxShieldHit();
+    this.shockwave = { x, y, t: 0, max: 250, color: '#4dffff' };
+    this._shake(4, 6);
+    this._flash(0.3, '#4dffff');
+    this._spawnParticles({
+      x, y, count: 10, speed: 6, life: 30,
+      color: '#4dffff', size: 3, glow: true,
+    });
   },
 };
 
@@ -2416,19 +2434,8 @@ function update() {
           G.shieldsUsedTotal++;
           G.invincibleFrames = 20;
           G.combo = 0;
-          G.shakeFrames = 6;
-          G.shakeIntensity = 3;
-          G.flashAlpha = 0.2;
+          FX.shieldHit(e.x, e.y);
           // Destroy the enemy
-          for (let j = 0; j < 6; j++) {
-            G.particles.push({
-              x: e.x, y: e.y,
-              vx: (Math.random() - 0.5) * 4,
-              vy: (Math.random() - 0.5) * 4,
-              life: 20, maxLife: 20,
-              color: '#00aaff', size: 2,
-            });
-          }
           G.enemies.splice(i, 1);
           checkShieldBadge();
           saveData();
@@ -2482,23 +2489,8 @@ function update() {
       G.bert.vy = 0;
 
       // Visual + haptic feedback
-      G.shakeFrames = 10;
-      G.shakeIntensity = 5;
-      G.flashAlpha = 0.4;
+      FX.shieldHit(G.bert.x, G.bert.y);
       try { navigator.vibrate && navigator.vibrate([30, 20, 50]); } catch(e) {}
-
-      // Shatter particles
-      for (let i = 0; i < 12; i++) {
-        G.particles.push({
-          x: G.bert.x, y: G.bert.y,
-          vx: (Math.random() - 0.5) * 6,
-          vy: (Math.random() - 0.5) * 6,
-          life: 25 + Math.random() * 15,
-          maxLife: 40,
-          color: '#00aaff',
-          size: Math.random() * 3 + 1,
-        });
-      }
 
       // +5 coin survival bonus
       G.coins += 5;
@@ -2719,7 +2711,25 @@ function render() {
       ctx.restore();
     }
   }
-  
+
+  // Shockwave (shield hit)
+  if (FX.shockwave) {
+    const sw = FX.shockwave;
+    sw.t += 16;
+    const p = sw.t / sw.max;
+    if (p >= 1) { FX.shockwave = null; }
+    else {
+      ctx.save();
+      ctx.strokeStyle = sw.color || '#4dffff';
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = 1 - p;
+      ctx.beginPath();
+      ctx.arc(sw.x, sw.y, p * 80, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
   // Close screen shake transform
   ctx.restore();
 }
