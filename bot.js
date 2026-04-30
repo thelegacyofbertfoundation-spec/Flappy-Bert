@@ -78,9 +78,17 @@ function validateScore(session, body) {
   const { score, level, shieldUsed, adContinueUsed, scoreMultiplier } = body;
   const issues = [];
 
+  // 0. Numeric guard — must be a non-negative integer (rejects strings, NaN, Infinity, fractional, negative)
+  const n = Number(score);
+  if (!Number.isInteger(n) || n < 0) {
+    console.log(`🚫 Score REJECTED: score=${JSON.stringify(score)} not a non-negative integer`);
+    return { valid: false, reason: 'invalid_score' };
+  }
+  // Use n for downstream comparisons (also catches the string-coercion edge case).
+
   // 1. Hard score cap — only true hard reject
-  if (score > SCORE_LIMITS.MAX_ABSOLUTE_SCORE) {
-    console.log(`🚫 Score REJECTED: score=${score} exceeds hard cap`);
+  if (n > SCORE_LIMITS.MAX_ABSOLUTE_SCORE) {
+    console.log(`🚫 Score REJECTED: score=${n} exceeds hard cap`);
     return { valid: false, reason: 'exceeds_cap' };
   }
 
@@ -94,7 +102,7 @@ function validateScore(session, body) {
 
     // Time-based checks only if we have a session
     const elapsed = Date.now() - session.startedAt;
-    if (elapsed < SCORE_LIMITS.MIN_GAME_DURATION_MS && score > 5) {
+    if (elapsed < SCORE_LIMITS.MIN_GAME_DURATION_MS && n > 5) {
       issues.push('too_fast');
     }
 
@@ -112,30 +120,30 @@ function validateScore(session, body) {
     }
 
     const maxScoreForTime = Math.ceil((elapsed / 1000) * maxScorePerSecond);
-    if (score > maxScoreForTime && score > 10) {
+    if (n > maxScoreForTime && n > 10) {
       issues.push('score_exceeds_time');
     }
   }
 
   if (issues.length > 0) {
     const tid = session ? session.telegramId : 'unknown';
-    console.log(`⚠️  Score flagged [${tid}]: score=${score} issues=[${issues.join(',')}]`);
+    console.log(`⚠️  Score flagged [${tid}]: score=${n} issues=[${issues.join(',')}]`);
   }
 
   // Reject replay attacks
-  if (issues.includes('session_reused') && score > 20) {
+  if (issues.includes('session_reused') && n > 20) {
     return { valid: false, reason: 'session_reused' };
   }
   // Reject sessionless high scores (curl attacks)
-  if (issues.includes('no_session') && score > 30) {
+  if (issues.includes('no_session') && n > 30) {
     return { valid: false, reason: 'no_session_high_score' };
   }
   // Reject impossibly fast scores
-  if (issues.includes('too_fast') && score > 15) {
+  if (issues.includes('too_fast') && n > 15) {
     return { valid: false, reason: 'too_fast' };
   }
   // Reject scores exceeding time-based limit
-  if (issues.includes('score_exceeds_time') && score > 30) {
+  if (issues.includes('score_exceeds_time') && n > 30) {
     return { valid: false, reason: 'score_exceeds_time' };
   }
 
@@ -683,7 +691,9 @@ app.post('/api/score', rateLimit(10, 60000), (req, res) => {
     if (session) session.used = true;
 
     db.upsertPlayer(telegram_id, first_name || 'Player', username || null);
-    db.submitScore(telegram_id, score, level || 1, coins_earned || 0);
+    // validateScore approved — safe to coerce to integer for DB write
+    const validatedScore = Number(score);
+    db.submitScore(telegram_id, validatedScore, level || 1, coins_earned || 0);
 
     // Store badges if provided
     if (badges && Array.isArray(badges)) {
@@ -869,22 +879,28 @@ app.post('/api/tournament/:id/score', (req, res) => {
   if (!telegram_id || score == null) {
     return res.status(400).json({ error: 'telegram_id and score required' });
   }
-  
+
+  // Numeric guard — must be a non-negative integer
+  const tn = Number(score);
+  if (!Number.isInteger(tn) || tn < 0) {
+    return res.status(400).json({ error: 'score must be a non-negative integer' });
+  }
+
   if (db.isBanned(telegram_id)) {
     return res.status(403).json({ error: 'Player is banned' });
   }
-  
+
   // Anti-cheat: hard cap + session check
-  if (score > SCORE_LIMITS.MAX_ABSOLUTE_SCORE) {
-    console.log(`🚫 Tournament score REJECTED [${telegram_id}]: score=${score} exceeds cap`);
+  if (tn > SCORE_LIMITS.MAX_ABSOLUTE_SCORE) {
+    console.log(`🚫 Tournament score REJECTED [${telegram_id}]: score=${tn} exceeds cap`);
     return res.status(403).json({ error: 'Score rejected' });
   }
   const session = gameSessions.get(session_id);
   if (session && session.telegramId !== telegram_id) {
     return res.status(403).json({ error: 'Invalid session' });
   }
-  
-  db.submitTournamentScore(req.params.id, telegram_id, score, level || 1, coins_earned || 0);
+
+  db.submitTournamentScore(req.params.id, telegram_id, tn, level || 1, coins_earned || 0);
   const rank = db.getTournamentPlayerRank(req.params.id, telegram_id);
   res.json({ ok: true, rank });
 });
