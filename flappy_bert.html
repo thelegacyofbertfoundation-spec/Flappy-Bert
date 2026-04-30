@@ -1617,28 +1617,21 @@ function gameOver() {
   AudioSystem.stopMusic();
   AudioSystem.playDeath();
   
-  // Screen shake + flash
-  G.shakeFrames = 20;
-  G.shakeIntensity = 8;
-  G.flashAlpha = 0.7;
-  
+  // Screen shake + flash + death burst — orchestrated via FX
+  FX._shake(8, 20);
+  FX._flash(0.7, 'white');
+
   // Haptic buzz on death
   try { navigator.vibrate && navigator.vibrate([50, 30, 80]); } catch(e) {}
-  
+
   // Fling Bert upward then let gravity pull down
   G.bert.vy = -4;
-  
-  // Death particles
-  for (let i = 0; i < 20; i++) {
-    G.particles.push({
-      x: G.bert.x, y: G.bert.y,
-      vx: (Math.random() - 0.5) * 8,
-      vy: (Math.random() - 0.5) * 8,
-      life: 40 + Math.random() * 20, maxLife: 60,
-      color: getSkinColor(),
-      size: Math.random() * 4 + 2,
-    });
-  }
+
+  FX._spawnParticles({
+    x: G.bert.x, y: G.bert.y,
+    count: 20, speed: 8,
+    life: 50, color: getSkinColor(), size: 3,
+  });
   
   document.getElementById('pauseBtn').style.display = 'none';
   document.getElementById('comboDisplay').style.display = 'none';
