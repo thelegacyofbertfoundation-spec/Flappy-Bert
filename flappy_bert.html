@@ -522,6 +522,20 @@ html, body {
   width: 100%;
   transition: width 0.1s linear;
 }
+.fx-go-step {
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+}
+.fx-go-step.fx-go-show {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+}
+/* TEMPORARY: until Task 23/24 wire FX.gameOverSequence, force steps visible.
+   This rule will be removed in Task 23. */
+.fx-go-step { visibility: visible; opacity: 1; transform: none; }
 </style>
 </head>
 <body>
@@ -654,30 +668,36 @@ html, body {
 
 <!-- Game Over -->
 <div class="overlay" id="gameOverOverlay">
-  <div class="go-panel">
-    <div id="goBadgePopup" style="display:none;font-size:10px;color:#ffd700;margin-bottom:6px;animation:pulse 0.5s ease-in-out 3"></div>
-    <div class="go-title">GAME OVER</div>
-    <div id="goMedal" style="font-size:36px;margin:4px 0;display:none"></div>
-    <div class="go-label">SCORE</div>
-    <div class="go-score" id="goScore">0</div>
-    <div class="go-best" id="goBest">BEST: 0</div>
-    <div id="goRankNudge" style="font-size:7px;color:var(--accent3);margin:4px 0;display:none"></div>
-    <div class="go-coins" id="goCoins">+0 &#x1FA99;</div>
-    <div id="goDoubleCoins" style="display:none;margin:4px 0">
-      <button class="btn btn-gold" style="font-size:7px;padding:6px 12px" onclick="doubleCoinsWithAd()">&#x1F3AC; WATCH AD TO DOUBLE</button>
+  <div class="go-panel" id="goPanel">
+    <div class="go-rewards">
+      <div id="goBadgePopup" class="go-section-badge" style="display:none;font-size:10px;color:#ffd700;animation:pulse 0.5s ease-in-out 3"></div>
     </div>
-    <div class="go-level" id="goLevel">LEVEL 1</div>
-    <div id="goCombo" style="font-size:7px;color:#ffb800;margin:4px 0;display:none"></div>
-    <div id="goMultiplier" style="font-size:7px;color:var(--accent3);margin:4px 0;display:none"></div>
-    <div id="goTournament" style="font-size:7px;color:#ffd700;margin:4px 0;display:none"></div>
-    <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:8px">
-      <button class="btn btn-primary" style="min-width:120px" onclick="startGame()">&#x1F504; PLAY AGAIN</button>
-      <button class="btn btn-gold" id="goContinueBtn" style="min-width:120px;display:none" onclick="continueWithAd()">&#x25B6;&#xFE0F; CONTINUE</button>
+    <div class="go-title fx-go-step" data-step="title">GAME OVER</div>
+    <div class="go-hero fx-go-step" data-step="hero">
+      <div id="goMedal" style="font-size:36px;margin:4px 0;display:none"></div>
+      <div class="go-label">SCORE</div>
+      <div class="go-score-hero" id="goScore">0</div>
+      <div class="go-best" id="goBest">BEST: 0</div>
+      <div id="goRankNudge" style="font-size:7px;color:var(--accent3);margin:4px 0;display:none"></div>
     </div>
-    <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:6px">
-      <button class="btn btn-secondary" style="font-size:7px;padding:6px 10px" onclick="showMenu()">&#x1F3E0; MENU</button>
-      <button class="btn btn-secondary" style="font-size:7px;padding:6px 10px" onclick="showShop()">&#x1F6D2; SHOP</button>
-      <button class="btn btn-secondary" style="font-size:7px;padding:6px 10px" onclick="showLeaderboard()">&#x1F3C6; RANKS</button>
+    <div class="go-stats fx-go-step" data-step="stats">
+      <div class="go-level" id="goLevel">LEVEL 1</div>
+      <div id="goCombo" style="font-size:7px;color:#ffb800;margin:4px 0;display:none"></div>
+      <div id="goMultiplier" style="font-size:7px;color:var(--accent3);margin:4px 0;display:none"></div>
+    </div>
+    <div class="go-rewards-bottom fx-go-step" data-step="rewards">
+      <div class="go-coins" id="goCoins">+0 &#x1FA99;</div>
+      <div id="goTournament" style="font-size:7px;color:#ffd700;margin:4px 0;display:none"></div>
+    </div>
+    <div class="go-actions fx-go-step" data-step="actions">
+      <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:8px">
+        <button class="btn btn-primary" style="min-width:120px" onclick="startGame()">&#x1F504; PLAY AGAIN</button>
+      </div>
+      <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:6px">
+        <button class="btn btn-secondary" style="font-size:7px;padding:6px 10px" onclick="showMenu()">&#x1F3E0; MENU</button>
+        <button class="btn btn-secondary" style="font-size:7px;padding:6px 10px" onclick="showShop()">&#x1F6D2; SHOP</button>
+        <button class="btn btn-secondary" style="font-size:7px;padding:6px 10px" onclick="showLeaderboard()">&#x1F3C6; RANKS</button>
+      </div>
     </div>
   </div>
 </div>
@@ -784,9 +804,6 @@ const G = {
   earnedBadges: [],
   shieldsUsedTotal: 0,
   nearMissesThisGame: 0,
-  // Phase 1: Ads
-  adContinueUsed: false,
-  adInterstitialCounter: 0,
   // Powerups
   powerups: { magnet: { active: false, expiresAt: 0 } },
 };
@@ -1629,7 +1646,6 @@ function startGame() {
   G.shieldSpawnedThisGame = false;
   G.invincibleFrames = 0;
   G.nearMissesThisGame = 0;
-  G.adContinueUsed = false;
   G.readyBobFrame = 0;
   G.powerups.magnet.active = false;
   G.powerups.magnet.expiresAt = 0;
@@ -1943,9 +1959,6 @@ function showGameOverScreen() {
   saveData();
   updateCoinDisplay();
 
-  // Increment interstitial counter
-  G.adInterstitialCounter++;
-
   document.getElementById('scoreDisplay').style.display = 'none';
   document.getElementById('levelIndicator').style.display = 'none';
   document.getElementById('multBar').style.display = 'none';
@@ -1960,8 +1973,6 @@ function showGameOverScreen() {
   const goMultiplier = document.getElementById('goMultiplier');
   const goRankNudge = document.getElementById('goRankNudge');
   const goBadgePopup = document.getElementById('goBadgePopup');
-  const goContinueBtn = document.getElementById('goContinueBtn');
-  const goDoubleCoins = document.getElementById('goDoubleCoins');
 
   goScore.textContent = G.score;
   goScore.className = isNewBest ? 'go-score new-best' : 'go-score';
@@ -2030,12 +2041,6 @@ function showGameOverScreen() {
     }
   }
 
-  // Continue button (rewarded ad, once per game, only if ad ready)
-  goContinueBtn.style.display = (!G.adContinueUsed && AdSystem.isRewardedReady()) ? '' : 'none';
-
-  // Double coins button (only if ad ready and coins > 0)
-  goDoubleCoins.style.display = (G.coinsEarned > 0 && AdSystem.isRewardedReady()) ? '' : 'none';
-
   // Tournament display — keyed on the SAME state submitTournamentScore uses
   // (ALL_TOURNAMENTS, populated by /api/tournaments). Previously read
   // FEATURED_TOURNAMENT, which is filtered through a 7-day window and could
@@ -2049,58 +2054,7 @@ function showGameOverScreen() {
     tournEl.style.display = 'none';
   }
 
-  // Interstitial ad every 4th game
-  if (G.adInterstitialCounter % 4 === 0 && AdSystem.isInterstitialReady()) {
-    AdSystem.showInterstitial(() => {});
-  }
-
   showOverlay('gameOverOverlay');
-}
-
-function continueWithAd() {
-  AdSystem.showRewarded(function(completed) {
-    if (!completed) return;
-
-    G.adContinueUsed = true;
-
-    // Remove pipes and enemies near Bert
-    const clearRange = G.width * 2;
-    G.pipes = G.pipes.filter(p => Math.abs(p.x - G.bert.x) > clearRange);
-    G.enemies = G.enemies.filter(e => Math.abs(e.x - G.bert.x) > clearRange);
-
-    // Reset Bert to center with zero velocity
-    G.bert.y = (G.height - G.groundHeight) / 2;
-    G.bert.vy = 0;
-    G.bert.rotation = 0;
-
-    // Grace period: no new pipes for 60 frames
-    G.pipeTimer = -60;
-
-    // Reset combo
-    G.combo = 0;
-
-    // Brief countdown then resume
-    G.state = 'continuing';
-    G.continueTimer = 30; // ~0.5s countdown
-
-    hideAllOverlays();
-  });
-}
-
-function doubleCoinsWithAd() {
-  AdSystem.showRewarded(function(completed) {
-    if (!completed) return;
-    const bonus = G.coinsEarned; // Double = add same amount again
-    G.coins += bonus;
-    G.coinsEarned += bonus;
-    updateCoinDisplay();
-    saveData();
-    // Hide the button after use
-    document.getElementById('goDoubleCoins').style.display = 'none';
-    // Update coins display on game over screen
-    document.getElementById('goCoins').innerHTML = '+' + G.coinsEarned + ' &#x1FA99;';
-    showToast('Coins doubled! +' + bonus);
-  });
 }
 
 function updateLeaderboard(name, score) {
@@ -2397,8 +2351,7 @@ function update() {
     }
     
     // Show score screen after death animation
-    const deathDuration = (G.adInterstitialCounter > 0 && (G.adInterstitialCounter + 1) % 4 === 0 && AdSystem.isInterstitialReady()) ? 90 : 50;
-    if (G.deathTimer >= deathDuration) {
+    if (G.deathTimer >= 50) {
       finalGameOver();
     }
     return;
@@ -4269,7 +4222,6 @@ async function submitScoreToServer(score, level, coinsEarned) {
         duration,
         badges: G.earnedBadges,
         shieldUsed: G.shieldUsedThisGame,
-        adContinueUsed: G.adContinueUsed,
         scoreMultiplier: G.scoreMultiplier,
         init_data: getTelegramInitData(),
       }),
