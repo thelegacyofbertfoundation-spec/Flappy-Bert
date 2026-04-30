@@ -142,6 +142,14 @@ function validateScore(session, body) {
   return { valid: true, issues, flagged: issues.length > 0 };
 }
 
+// Escape Telegram Markdown V1 special characters in user/operator-supplied strings.
+// V1 is the parse_mode all current sendMessage/sendPhoto calls in this file use.
+// V1 specials: _ * [ ] ( ) ~ ` > # + - = | { } . ! \
+function escapeMarkdown(s) {
+  if (s == null) return '';
+  return String(s).replace(/([_*\[\]()~`>#+=|{}.!\\\-])/g, '\\$1');
+}
+
 if (!BOT_TOKEN) {
   console.error('❌  BOT_TOKEN environment variable is required.');
   console.error('   Get one from @BotFather on Telegram.');
@@ -367,7 +375,7 @@ bot.onText(/\/ban(?:\s+(\d+))?/, (msg, match) => {
     const player = db.getPlayer(targetId);
     const name = player ? player.first_name : 'Unknown';
     
-    bot.sendMessage(msg.chat.id, `🚫 Permanently banned *${name}* (${targetId})\n\nAll scores removed. Future submissions blocked.`, { parse_mode: 'Markdown' });
+    bot.sendMessage(msg.chat.id, `🚫 Permanently banned *${escapeMarkdown(name)}* (${targetId})\n\nAll scores removed. Future submissions blocked.`, { parse_mode: 'Markdown' });
     console.log(`🚫 Admin ${msg.from.id} banned player ${targetId}`);
   } catch(err) {
     bot.sendMessage(msg.chat.id, '❌ Error: ' + err.message);
@@ -387,7 +395,7 @@ bot.onText(/\/unban(?:\s+(\d+))?/, (msg, match) => {
     db.unbanPlayer(targetId);
     const player = db.getPlayer(targetId);
     const name = player ? player.first_name : 'Unknown';
-    bot.sendMessage(msg.chat.id, `✅ Unbanned *${name}* (${targetId})`, { parse_mode: 'Markdown' });
+    bot.sendMessage(msg.chat.id, `✅ Unbanned *${escapeMarkdown(name)}* (${targetId})`, { parse_mode: 'Markdown' });
   } catch(err) {
     bot.sendMessage(msg.chat.id, '❌ Error: ' + err.message);
   }
@@ -410,7 +418,7 @@ bot.onText(/\/resettournament/, (msg) => {
       return;
     }
     db.resetTournamentScores(target.id);
-    bot.sendMessage(msg.chat.id, `🗑 Tournament scores wiped for *${target.name}*.`, { parse_mode: 'Markdown' });
+    bot.sendMessage(msg.chat.id, `🗑 Tournament scores wiped for *${escapeMarkdown(target.name)}*.`, { parse_mode: 'Markdown' });
     console.log(`🗑 Admin ${msg.from.id} reset tournament scores for ${target.id}`);
   } catch(err) {
     bot.sendMessage(msg.chat.id, '❌ Error: ' + err.message);
@@ -516,7 +524,7 @@ bot.onText(/^\/tournament(?:\s+(.+))?$/, async (msg, match) => {
     const rankText = rank ? `\n🏅 Your rank: #${rank}` : '';
 
     await bot.sendPhoto(chatId, pngBuffer, {
-      caption: `🏟 *${chosen.name}*\nSponsored by ${chosen.sponsor}\n\n${statusText}${rankText}\n\nUse /play to compete!`,
+      caption: `🏟 *${escapeMarkdown(chosen.name)}*\nSponsored by ${escapeMarkdown(chosen.sponsor)}\n\n${statusText}${rankText}\n\nUse /play to compete!`,
       parse_mode: 'Markdown',
     }, {
       filename: 'tournament.png',
