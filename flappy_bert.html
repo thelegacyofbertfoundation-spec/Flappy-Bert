@@ -1167,8 +1167,8 @@ const FX = {
     for (let i = 0; i < allow; i++) {
       G.particles.push({
         x: opts.x, y: opts.y,
-        vx: (Math.random() - 0.5) * speed + (opts.vx0 || 0),
-        vy: (Math.random() - 0.5) * speed + (opts.vy0 || 0),
+        vx: (speed === 0 ? 0 : (Math.random() - 0.5) * speed) + (opts.vx0 || 0),
+        vy: (speed === 0 ? 0 : (Math.random() - 0.5) * speed) + (opts.vy0 || 0),
         life: opts.life || 30, maxLife: opts.life || 30,
         color: opts.color || '#fff',
         size: opts.size || 2,

@@ -12,8 +12,8 @@ function spawnParticles(particles, opts) {
   for (let i = 0; i < allow; i++) {
     particles.push({
       x: opts.x, y: opts.y,
-      vx: (Math.random() - 0.5) * speed,
-      vy: (Math.random() - 0.5) * speed,
+      vx: speed === 0 ? 0 : (Math.random() - 0.5) * speed,
+      vy: speed === 0 ? 0 : (Math.random() - 0.5) * speed,
       life: opts.life || 30, maxLife: opts.life || 30,
       color: opts.color || '#fff',
       size: opts.size || 2,
