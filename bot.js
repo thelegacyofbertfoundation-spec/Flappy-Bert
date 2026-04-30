@@ -143,11 +143,12 @@ function validateScore(session, body) {
 }
 
 // Escape Telegram Markdown V1 special characters in user/operator-supplied strings.
-// V1 is the parse_mode all current sendMessage/sendPhoto calls in this file use.
-// V1 specials: _ * [ ] ( ) ~ ` > # + - = | { } . ! \
+// V1 has 4 specials: _ * ` [
+// V1 has no backslash-escape mechanism, but Telegram tolerates a leading backslash
+// before V1 specials and renders them as the literal char (verified empirically).
 function escapeMarkdown(s) {
   if (s == null) return '';
-  return String(s).replace(/([_*\[\]()~`>#+=|{}.!\\\-])/g, '\\$1');
+  return String(s).replace(/([_*`\[])/g, '\\$1');
 }
 
 if (!BOT_TOKEN) {
@@ -227,7 +228,7 @@ bot.onText(/\/start/, (msg) => {
   bot.sendMessage(chatId, [
     '🐕 *Welcome to Flappy Bert!*',
     '',
-    `Hey ${user.first_name}! Ready to flap?`,
+    `Hey ${escapeMarkdown(user.first_name)}! Ready to flap?`,
     '',
     'Tap to fly Bert through endless pipes, rack up combos, and earn coins. Climb the weekly leaderboard, complete daily challenges, and unlock skins in the shop.',
     '',
@@ -313,7 +314,7 @@ bot.onText(/\/mystats/, async (msg) => {
 
     await bot.sendPhoto(chatId, pngBuffer, {
       caption: [
-        `📊 *Stats for ${player.first_name}*`,
+        `📊 *Stats for ${escapeMarkdown(player.first_name)}*`,
         `🏅 Weekly Rank: ${rank ? '#' + rank : 'Unranked'}`,
         `🪙 Coins: ${player.coins}`,
         '',
@@ -551,9 +552,9 @@ bot.on('web_app_data', (msg) => {
     bot.sendMessage(msg.chat.id, [
       `🎮 *Game Over!*`,
       ``,
-      `📊 Score: *${data.score}*`,
-      `📈 Level: ${data.level}`,
-      `🪙 Coins earned: +${data.coinsEarned}`,
+      `📊 Score: *${Number(data.score) || 0}*`,
+      `📈 Level: ${Number(data.level) || 0}`,
+      `🪙 Coins earned: +${Number(data.coinsEarned) || 0}`,
       rankText ? `🏅 ${rankText}` : '',
       '',
       'Use /leaderboard to see the rankings!',
