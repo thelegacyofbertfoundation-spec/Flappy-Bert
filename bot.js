@@ -864,45 +864,72 @@ app.get('/api/tournament/:id', (req, res) => {
 });
 
 // POST /api/tournament/:id/score — Submit score to tournament
-app.post('/api/tournament/:id/score', (req, res) => {
-  const t = db.getTournament(req.params.id);
-  if (!t) return res.status(404).json({ error: 'Tournament not found' });
-  
-  const now = new Date();
-  const start = new Date(t.start_time);
-  const end = new Date(t.end_time);
-  if (now < start || now > end) {
-    return res.status(400).json({ error: 'Tournament not active' });
-  }
-  
-  const { telegram_id, score, level, coins_earned, session_id } = req.body;
-  if (!telegram_id || score == null) {
-    return res.status(400).json({ error: 'telegram_id and score required' });
-  }
+app.post('/api/tournament/:id/score', rateLimit(10, 60000), (req, res) => {
+  try {
+    const t = db.getTournament(req.params.id);
+    if (!t) return res.status(404).json({ error: 'Tournament not found' });
 
-  // Numeric guard — must be a non-negative integer
-  const tn = Number(score);
-  if (!Number.isInteger(tn) || tn < 0) {
-    return res.status(400).json({ error: 'score must be a non-negative integer' });
-  }
+    const now = new Date();
+    const start = new Date(t.start_time);
+    const end = new Date(t.end_time);
+    if (now < start || now > end) {
+      return res.status(400).json({ error: 'Tournament not active' });
+    }
 
-  if (db.isBanned(telegram_id)) {
-    return res.status(403).json({ error: 'Player is banned' });
-  }
+    const {
+      telegram_id, first_name, username,
+      score, level, coins_earned,
+      session_id, duration,
+      badges, shieldUsed, adContinueUsed, scoreMultiplier,
+      init_data,
+    } = req.body;
 
-  // Anti-cheat: hard cap + session check
-  if (tn > SCORE_LIMITS.MAX_ABSOLUTE_SCORE) {
-    console.log(`🚫 Tournament score REJECTED [${telegram_id}]: score=${tn} exceeds cap`);
-    return res.status(403).json({ error: 'Score rejected' });
-  }
-  const session = gameSessions.get(session_id);
-  if (session && session.telegramId !== telegram_id) {
-    return res.status(403).json({ error: 'Invalid session' });
-  }
+    if (!telegram_id || score == null) {
+      return res.status(400).json({ error: 'telegram_id and score required' });
+    }
 
-  db.submitTournamentScore(req.params.id, telegram_id, tn, level || 1, coins_earned || 0);
-  const rank = db.getTournamentPlayerRank(req.params.id, telegram_id);
-  res.json({ ok: true, rank });
+    // Validate Telegram identity if initData provided (mirrors /api/score)
+    if (init_data) {
+      const verified = validateTelegramInitData(init_data);
+      if (!verified || String(verified.id) !== String(telegram_id)) {
+        return res.status(403).json({ error: 'Invalid Telegram identity' });
+      }
+    }
+
+    if (db.isBanned(telegram_id)) {
+      return res.status(403).json({ error: 'Player is banned' });
+    }
+
+    // Session ownership check
+    const session = gameSessions.get(session_id);
+    if (session && session.telegramId !== telegram_id) {
+      console.log(`⚠️  Tournament session hijack attempt: session=${session_id} owner=${session.telegramId} submitter=${telegram_id}`);
+      return res.status(403).json({ error: 'Invalid session' });
+    }
+
+    // Full anti-cheat validation (numeric guard, hard cap, time-based, session-reuse)
+    const validation = validateScore(session, { score, level, coins_earned, duration, shieldUsed, adContinueUsed, scoreMultiplier });
+    if (!validation.valid) {
+      console.log(`🚫 Tournament score REJECTED [${telegram_id}]: score=${score} reason=${validation.reason}`);
+      return res.status(403).json({ error: 'Score rejected', reason: validation.reason });
+    }
+
+    // Mark session as used
+    if (session) session.used = true;
+
+    // Upsert the player so they appear on the leaderboard's INNER JOIN
+    db.upsertPlayer(telegram_id, first_name || 'Player', username || null);
+
+    // Coerce score to integer for DB write (validateScore approved)
+    const validatedScore = Number(score);
+    db.submitTournamentScore(req.params.id, telegram_id, validatedScore, level || 1, coins_earned || 0);
+
+    const rank = db.getTournamentPlayerRank(req.params.id, telegram_id);
+    res.json({ ok: true, rank, flagged: validation.flagged });
+  } catch (err) {
+    console.error('API tournament score error:', err);
+    res.status(500).json({ error: 'Internal error' });
+  }
 });
 
 // GET /api/archives/:week — Download a specific week's CSV
