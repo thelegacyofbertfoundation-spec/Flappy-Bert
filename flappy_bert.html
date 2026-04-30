@@ -907,6 +907,25 @@ const AudioSystem = {
       this.sfxGain = this.ctx.createGain();
       this.sfxGain.gain.value = 0.4;
       this.sfxGain.connect(this.masterGain);
+
+      // Synthesized reverb: ConvolverNode fed by a synthesized impulse response.
+      // Generated once at boot; routed through sfxGain so the mute toggle covers it.
+      try {
+        const ir = this.ctx.createBuffer(2, this.ctx.sampleRate * 0.4, this.ctx.sampleRate);
+        for (let ch = 0; ch < 2; ch++) {
+          const data = ir.getChannelData(ch);
+          for (let i = 0; i < data.length; i++) {
+            const t = i / data.length;
+            data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 2.5);
+          }
+        }
+        this.reverb = this.ctx.createConvolver();
+        this.reverb.buffer = ir;
+        this.reverbSend = this.ctx.createGain();
+        this.reverbSend.gain.value = 0.15;
+        this.reverbSend.connect(this.reverb);
+        this.reverb.connect(this.sfxGain);
+      } catch(e) { /* reverb optional — ignore */ }
     } catch(e) { console.log('Audio not available'); }
   },
   
