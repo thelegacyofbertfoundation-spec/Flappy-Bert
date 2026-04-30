@@ -3389,8 +3389,13 @@ async function submitTournamentScore(score, level, coinsEarned) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        telegram_id: user.id, score, level, coins_earned: coinsEarned,
+        telegram_id: user.id,
+        first_name: user.first_name,
+        username: user.username,
+        score, level, coins_earned: coinsEarned,
         session_id: _gameSession,
+        scoreMultiplier: G.scoreMultiplier,
+        init_data: getTelegramInitData(),
       }),
     });
   } catch(e) {}
