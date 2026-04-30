@@ -1007,7 +1007,7 @@ function checkAutoArchive() {
   const nextMonday = db.getNextMondayUTC();
   const msUntilReset = nextMonday.getTime() - now.getTime();
   const currentWeek = db.getWeekStart();
-  
+
   // Archive if within 30 minutes of reset and not already archived this week
   if (msUntilReset <= 30 * 60 * 1000 && msUntilReset > 0 && lastArchivedWeek !== currentWeek) {
     const result = db.archiveWeek(currentWeek);
@@ -1018,7 +1018,26 @@ function checkAutoArchive() {
   }
 }
 
+// Boot-time recovery: if any of the last 4 completed weeks is missing its
+// CSV (e.g. bot was deploying or crashed across the Monday 00:00 UTC window),
+// archive it now. archiveWeek is idempotent — returns {alreadyExists:true} if
+// the file is there, so this is a no-op when the file system is up to date.
+function recoverMissedArchives() {
+  const currentWeek = db.getWeekStart();
+  const currentMs = new Date(currentWeek + 'T00:00:00Z').getTime();
+  for (let i = 1; i <= 4; i++) {
+    const past = new Date(currentMs - i * 7 * 24 * 60 * 60 * 1000);
+    const pastWeek = past.toISOString().slice(0, 10);
+    const result = db.archiveWeek(pastWeek);
+    if (result && !result.alreadyExists) {
+      console.log(`✅  Boot-time archive recovery: archived week ${pastWeek} (${result.playerCount} players)`);
+    }
+  }
+}
+
 // Check every 10 minutes
 setInterval(checkAutoArchive, 10 * 60 * 1000);
 // Also check on startup (in case server restarted close to reset)
 checkAutoArchive();
+// Recover any missed weeks (bot down across a Monday reset)
+recoverMissedArchives();
