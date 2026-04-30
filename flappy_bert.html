@@ -3616,9 +3616,10 @@ function renderLeaderboard() {
     for (let i = 0; i < G.leaderboard.length; i++) {
       const entry = G.leaderboard[i];
       const rank = i + 1;
-      // Match by telegram_id if available, fallback to name
-      const isYou = (currentUser && entry.telegram_id && String(entry.telegram_id) === String(currentUser.id))
-                     || entry.name === G.playerName;
+      // Match by telegram_id only — the old name-fallback would falsely highlight
+      // any player whose first_name matches G.playerName (e.g. multiple "Player"s
+      // collide because the server-side default first_name is "Player").
+      const isYou = currentUser && entry.telegram_id && String(entry.telegram_id) === String(currentUser.id);
       let rowClass = 'lb-row';
       if (rank === 1) rowClass += ' top1';
       else if (rank === 2) rowClass += ' top2';

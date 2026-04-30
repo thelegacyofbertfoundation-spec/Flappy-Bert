@@ -159,6 +159,15 @@ function escapeMarkdown(s) {
   return String(s).replace(/([_*`\[])/g, '\\$1');
 }
 
+// When a request reaches /api/score or /api/tournament/:id/score without a
+// first_name (sessionless curl, mini-app pre-load, Telegram clients that strip
+// it), fall back to a stable per-id anonymous name. Avoids namespace collision
+// on "Player" — every fallback used to share that one name and they all
+// false-highlighted as "you" on each others' leaderboards.
+function anonName(telegramId) {
+  return 'Anon-' + String(telegramId).slice(-4);
+}
+
 if (!BOT_TOKEN) {
   console.error('❌  BOT_TOKEN environment variable is required.');
   console.error('   Get one from @BotFather on Telegram.');
@@ -690,7 +699,7 @@ app.post('/api/score', rateLimit(10, 60000), (req, res) => {
     // Mark session as used
     if (session) session.used = true;
 
-    db.upsertPlayer(telegram_id, first_name || 'Player', username || null);
+    db.upsertPlayer(telegram_id, first_name || anonName(telegram_id), username || null);
     // validateScore approved — safe to coerce to integer for DB write
     const validatedScore = Number(score);
     db.submitScore(telegram_id, validatedScore, level || 1, coins_earned || 0);
@@ -918,7 +927,7 @@ app.post('/api/tournament/:id/score', rateLimit(10, 60000), (req, res) => {
     if (session) session.used = true;
 
     // Upsert the player so they appear on the leaderboard's INNER JOIN
-    db.upsertPlayer(telegram_id, first_name || 'Player', username || null);
+    db.upsertPlayer(telegram_id, first_name || anonName(telegram_id), username || null);
 
     // Coerce score to integer for DB write (validateScore approved)
     const validatedScore = Number(score);
