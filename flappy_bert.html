@@ -1081,7 +1081,13 @@ const AudioSystem = {
     osc.start(now);
     osc.stop(now + 0.15);
   },
-  
+
+  // New chime for coin pickup (replaces playCoin in FX.coinPickup path)
+  fxCoinPickup() {
+    this._sweep(660, 1320, 80, 'sine', 0.14);
+    this._sweep(990, 1980, 80, 'triangle', 0.07);
+  },
+
   // Play death sound
   playDeath() {
     if (!this.ctx) return;
@@ -1198,6 +1204,15 @@ const FX = {
     if (!el) return;
     el.classList.add('fx-glow-pulse');
     setTimeout(() => el.classList.remove('fx-glow-pulse'), durationMs);
+  },
+
+  coinPickup(x, y) {
+    AudioSystem.fxCoinPickup();
+    this._spawnParticles({
+      x, y, count: 7, speed: 5, life: 24,
+      color: '#ffd700', size: 2, glow: true,
+    });
+    this._glowText('coinCount', 300);
   },
 };
 
@@ -2152,7 +2167,7 @@ function update() {
       G.coinsEarned += scoreGain;
       G.combo++;
       if (G.combo > G.bestCombo) G.bestCombo = G.combo;
-      AudioSystem.playCoin();
+      FX.coinPickup(G.bert.x, G.bert.y);
       updateDifficulty();
       const scoreEl = document.getElementById('scoreDisplay');
       scoreEl.textContent = G.score;
@@ -2247,7 +2262,7 @@ function update() {
       if (dist < 25) {
         p.shieldCollected = true;
         G.hasShield = true;
-        AudioSystem.playCoin();
+        FX.coinPickup(G.bert.x, G.bert.y);
         G.particles.push({
           x: shieldX, y: shieldY,
           vx: 0, vy: -1.5,
@@ -2599,7 +2614,10 @@ function render() {
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.fillStyle = p.color;
+      const prevComp = ctx.globalCompositeOperation;
+      if (p.glow) ctx.globalCompositeOperation = 'lighter';
       ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+      ctx.globalCompositeOperation = prevComp;
       ctx.restore();
     }
   }
