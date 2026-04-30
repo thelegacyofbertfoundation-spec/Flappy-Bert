@@ -57,11 +57,17 @@ No manual deploy step needed. Render builds from Dockerfile.
 - `POST /api/share` — Send score card image to Telegram chat
 - `GET /game` — Serves `flappy_bert.html`
 
-## Current tournament
-- **April Fools Flap-off 2026** — `april-fools-flapoff-2026`
-- April 1–30, 2026 UTC
-- Sponsor: Dr. Inker LABS
-- Tournament button always visible with countdown, goes green when live
+## Tournaments (data-driven since 2026-04-29)
+Tournament config lives in `tournaments.json` at project root, seeded into the SQLite `tournaments` table on bot startup via `tournaments-config.js` (idempotent — `INSERT OR IGNORE` on `id`). Adding a new tournament = append to the JSON and restart. No code changes.
+
+- **Active config:** Champions Flap-off (ended), April Fools Flap-off 2026 (Apr 1–30 UTC), May The Flap Be With You (May 1–31 UTC).
+- **Featured selection:** `/api/tournaments/featured` returns the prominent tournament for the home button using priority: live > upcoming<7d > recently_ended<14d. The mini-app's smart home button drives off `featured_state` (gold / silver / bronze).
+- **Three-section overlay:** the tournament screen renders Live / Upcoming / Past sections with conditional rendering. Past entries are collapsible.
+- **Persistent archive entry:** the menu has a "📜 PAST TOURNAMENTS" link that always opens the overlay scrolled to the past section, even when no tournament is featured.
+- **Production note:** the prod DB has duplicate April rows (`april-flapoff-2026` + `april-fools-flapoff-2026` from prior deploys). The `/api/tournaments/featured` priority logic picks one when both are live; ops cleanup is a `DELETE FROM tournaments WHERE id='april-flapoff-2026'` when convenient.
+
+## Roadmap
+- **Next session — Aesthetic / creative pass.** Sub-project #2 today shipped a hot-path bug sweep (option A in the brainstorm). The next pass is option C: aesthetic improvements, juice (animations / audio polish / juice on hits), and any new feature ideas. Inputs to that brainstorm: `docs/superpowers/bugs-defer-to-june.md` (deferred from today's audit) and the tournament-DB cleanup. Start the next session with the brainstorming skill.
 
 ## Game mechanics
 - **Levels:** Every 10 pipes cleared = +1 level. Speed, gap, pipe interval scale with level, plateau at level 20.
