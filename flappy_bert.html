@@ -1611,10 +1611,14 @@ function showGameOverScreen() {
   // Double coins button (only if ad ready and coins > 0)
   goDoubleCoins.style.display = (G.coinsEarned > 0 && AdSystem.isRewardedReady()) ? '' : 'none';
 
-  // Tournament display
+  // Tournament display — keyed on the SAME state submitTournamentScore uses
+  // (ALL_TOURNAMENTS, populated by /api/tournaments). Previously read
+  // FEATURED_TOURNAMENT, which is filtered through a 7-day window and could
+  // disagree with submit at rollover boundaries.
   const tournEl = document.getElementById('goTournament');
-  if (getTournamentStatus() === 'live') {
-    tournEl.innerHTML = '\u{1F3DF} CHAMPIONS FLAP-OFF \u{2014} SCORE SUBMITTED!';
+  const liveTourn = (typeof ALL_TOURNAMENTS !== 'undefined') ? ALL_TOURNAMENTS.find(t => t.status === 'live') : null;
+  if (liveTourn) {
+    tournEl.textContent = '\u{1F3DF} ' + String(liveTourn.name || '').toUpperCase() + ' \u{2014} SCORE SUBMITTED!';
     tournEl.style.display = 'block';
   } else {
     tournEl.style.display = 'none';
