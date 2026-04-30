@@ -18,7 +18,7 @@ This is option C from the original sub-project brainstorm: aesthetic improvement
 1. **Polish sweep** across 10 named moments (coin pickup, pipe pass, combo, near-miss, shield hit, level-up, JEET spawn, JEET dodge, game-over, audio).
 2. **New powerup: Magnet** — drops in pipe gaps (~3% rate from level 2), pulls on-screen coins toward Bert for 5 seconds.
 3. **Game-over redesign** — sequenced reveal (~2-3.2s), hero score treatment, dead ad-gated UI removed.
-4. **Audio polish** — pure Web Audio synth, helper extensions (`_adsr`, `_chord`, `_sweep`, `_noiseBurst`), synthesized reverb, per-event SFX rewrites.
+4. **Audio polish** — pure Web Audio synth on the existing `AudioSystem` singleton, helper extensions (`_adsr`, `_chord`, `_sweep`, `_noiseBurst`), synthesized reverb, per-event SFX rewrites.
 5. **Bundled cleanup:**
    - Delete dead `getTournamentCountdown()` function (deferred bug M1).
    - Remove dormant ad-gated UI (`goContinueBtn`, `goDoubleCoins` markup, `continueWithAd()`, `doubleCoinsWithAd()`, `adContinueUsed` / `adInterstitialCounter` plumbing).
@@ -39,7 +39,7 @@ This is option C from the original sub-project brainstorm: aesthetic improvement
 
 ## Architecture: the FX module
 
-A new `FX` object in the inline `<script>` of `flappy_bert.html`, declared after the `Sound` singleton and before game-loop functions. It is the single entry point for every "moment" in the game.
+A new `FX` object in the inline `<script>` of `flappy_bert.html`, declared after the `AudioSystem` singleton and before game-loop functions. It is the single entry point for every "moment" in the game.
 
 ```
 const FX = {
@@ -64,9 +64,9 @@ const FX = {
 
 Each public method is a self-contained orchestration: spawns particles, plays SFX, triggers screen effects, glows the relevant DOM number — whatever the moment needs. Game-loop code calls **one line per event**.
 
-`Sound.fx*` methods stay as the audio layer; `FX.*` methods *use* them. Particles continue to live in `G.particles`; `FX._spawnParticles(opts)` is a thin wrapper enforcing a soft cap and applying centralized defaults.
+`AudioSystem.play*` / new `AudioSystem.fx*` methods stay as the audio layer; `FX.*` methods *use* them. Particles continue to live in `G.particles`; `FX._spawnParticles(opts)` is a thin wrapper enforcing a soft cap and applying centralized defaults.
 
-The existing scattered juice (death particles, current shake/flash code, the few existing `Sound.fx*` calls in the game loop) gets refactored to call `FX.*` instead.
+The existing scattered juice (death particles, current shake/flash code, the few existing `AudioSystem.play*` calls in the game loop) gets refactored to call `FX.*` instead.
 
 ## Event catalog
 
@@ -121,12 +121,14 @@ Format: **trigger** → **visual** + **audio** + **screen FX**. *Italic* = exist
 
 All pure Web Audio (no asset bytes added).
 
-1. **ADSR helper** — `Sound._adsr(gainNode, { attack, decay, sustain, release, peak })` replaces the inline ramps.
-2. **Harmonic stacking helper** — `Sound._chord(freqs, type, durMs, gainPerVoice)` for combo arpeggios, level-up fanfare, magnet activation chord.
-3. **Synthesized reverb** — one shared `ConvolverNode` with a synthesized impulse response (white noise × exponential decay, ~400ms, generated at boot from a `Math.random()`-seeded buffer). New `Sound.reverbSend` gain (default 0.15). Per-SFX opt-in via `reverb: true`.
-4. **Lowpass filter helper** — `Sound._noiseBurst(durMs, cutoffHz, decayMs)` for swooshes, shield-shatter, magnet sweep noise. White-noise `AudioBufferSourceNode` → `BiquadFilterNode` (lowpass) → gain envelope.
-5. **Frequency-sweep helper** — `Sound._sweep(fStart, fEnd, durMs, type)` for coin pickups (ascending), magnet pickup (rising), magnet expire (descending).
-6. **Per-event SFX rewrites** — each `Sound.fx*` method tied to one of the catalog events below is rewritten using the helpers above with explicit ADSR characteristics. Music-loop scheduling functions are out of scope here (see point 7).
+All helpers added as methods on the existing `AudioSystem` singleton.
+
+1. **ADSR helper** — `AudioSystem._adsr(gainNode, { attack, decay, sustain, release, peak })` replaces the inline ramps.
+2. **Harmonic stacking helper** — `AudioSystem._chord(freqs, type, durMs, gainPerVoice)` for combo arpeggios, level-up fanfare, magnet activation chord.
+3. **Synthesized reverb** — one shared `ConvolverNode` with a synthesized impulse response (white noise × exponential decay, ~400ms, generated at boot from a `Math.random()`-seeded buffer). New `AudioSystem.reverbSend` gain (default 0.15). Per-SFX opt-in via `reverb: true`.
+4. **Lowpass filter helper** — `AudioSystem._noiseBurst(durMs, cutoffHz, decayMs)` for swooshes, shield-shatter, magnet sweep noise. White-noise `AudioBufferSourceNode` → `BiquadFilterNode` (lowpass) → gain envelope.
+5. **Frequency-sweep helper** — `AudioSystem._sweep(fStart, fEnd, durMs, type)` for coin pickups (ascending), magnet pickup (rising), magnet expire (descending).
+6. **Per-event SFX rewrites** — each existing `AudioSystem.play*` method tied to one of the catalog events (`playCoin`, `playDeath`) is rewritten using the helpers above with explicit ADSR characteristics, and new `AudioSystem.fx*` methods are added for the new events (combo, levelUp, shieldHit, jeetSpawn, jeetDodge, magnetPickup, magnetActivate, magnetExpire, gameOverSting, pipePass, nearMiss). Music-loop scheduling functions are out of scope here (see point 7).
    - Coin pickup: short bright sweep (660 → 1320Hz, 80ms, sine + tri stacked)
    - Combo: three-note arpeggio (root, fifth, octave) with reverb send
    - Level-up: fanfare (root, third, fifth, octave) over 700ms, reverb on
@@ -247,7 +249,7 @@ Total: ~3.2s for a maximal run, ~2.0s for short (skips combo/multiplier/badge/to
 
 **Unit tests** (extend `tests/`, follow `tournaments-config.test.js` pattern using `node:test` + `node:assert/strict`):
 
-- `Sound._adsr` — given input params, gain envelope hits expected values at expected times (mock AudioNode).
+- `AudioSystem._adsr` — given input params, gain envelope hits expected values at expected times (mock AudioNode).
 - `FX._spawnParticles` — respects 150-cap, drops silently when over.
 - Magnet expire timing — given `G.frameCount`, `G.powerups.magnet` clears at correct frame.
 - Magnet pickup-while-active — refreshes timer, does not stack.
@@ -272,8 +274,8 @@ All work in `flappy_bert.html` (per CLAUDE.md "single monolithic file" conventio
 
 New code in this order in the existing `<script>` block:
 
-1. `FX` object — defined right after `Sound` singleton, before game-loop functions.
-2. `Sound` helper extensions (`_adsr`, `_chord`, `_sweep`, `_noiseBurst`) — added inline to existing `Sound` object.
+1. `FX` object — defined right after `AudioSystem` singleton, before game-loop functions.
+2. `AudioSystem` helper extensions (`_adsr`, `_chord`, `_sweep`, `_noiseBurst`) — added inline to existing `AudioSystem` object.
 3. `G.powerups` initialization — added to existing game-state object.
 4. Game-loop integration — magnet physics in existing per-frame coin update; FX calls replace inline juice in event handlers.
 
