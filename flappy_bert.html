@@ -375,9 +375,9 @@ html, body {
 }
 .fx-glow-pulse { animation: fxGlowPulse 0.4s ease-out; }
 @keyframes fxGlowPulse {
-  0%   { transform: scale(1.0); text-shadow: 0 0 0 transparent; }
-  50%  { transform: scale(1.15); text-shadow: 0 0 12px currentColor; }
-  100% { transform: scale(1.0); text-shadow: 0 0 0 transparent; }
+  0%   { text-shadow: 0 0 0 transparent; }
+  50%  { text-shadow: 0 0 12px currentColor, 0 0 4px currentColor; }
+  100% { text-shadow: 0 0 0 transparent; }
 }
 
 /* Power indicator */
@@ -1158,6 +1158,8 @@ const FX = {
   PARTICLE_CAP: 150,
 
   _spawnParticles(opts) {
+    // Early-return when at cap: micro-opt; the Math.min clamp below would
+    // also yield 0 iterations. Mirror these two checks together.
     if (G.particles.length >= this.PARTICLE_CAP) return 0;
     const count = opts.count || 1;
     const allow = Math.min(count, this.PARTICLE_CAP - G.particles.length);
@@ -1188,6 +1190,9 @@ const FX = {
   },
 
   // Briefly glow a DOM element by toggling a class. Class auto-removed via setTimeout.
+  // TODO(task-23): chained glow events overwrite the timeout, causing
+  // premature animation truncation. Switch to per-element timer Map +
+  // clearTimeout before re-adding, or use animationend listener.
   _glowText(domId, durationMs = 400) {
     const el = document.getElementById(domId);
     if (!el) return;
@@ -2333,8 +2338,7 @@ function update() {
   G.ground.offset = (G.ground.offset + speed) % 32;
   G.scrollDistance += speed;
 
-  // Particles (cap at 80 to prevent frame drops on low-end devices)
-  while (G.particles.length > 80) G.particles.shift();
+  // Particles (cap enforced at spawn time by FX.PARTICLE_CAP=150)
   for (let i = G.particles.length - 1; i >= 0; i--) {
     const p = G.particles[i];
     p.x += p.vx || 0;
