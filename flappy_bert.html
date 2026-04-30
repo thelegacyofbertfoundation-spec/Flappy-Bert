@@ -3592,11 +3592,17 @@ function showScoreCardInline(dataUrl) {
 function renderLeaderboard() {
   const resetTime = getTimeUntilReset();
   const currentUser = getTelegramUser();
-  let html = '<div class="lb-title">\u{1F3C6} WEEKLY RANKINGS</div>';
-  html += `<div class="lb-reset-info">Resets in ${resetTime}</div>`;
-  
+  const children = [];
+
+  children.push(_makeEl('div', { cls: 'lb-title', text: '\u{1F3C6} WEEKLY RANKINGS' }));
+  children.push(_makeEl('div', { cls: 'lb-reset-info', text: 'Resets in ' + resetTime }));
+
   if (G.leaderboard.length === 0) {
-    html += '<div style="text-align:center;color:var(--text-dim);font-size:8px;padding:20px">No scores yet this week.<br>Play to be the first!</div>';
+    const empty = _makeEl('div', { style: 'text-align:center;color:var(--text-dim);font-size:8px;padding:20px' });
+    empty.appendChild(document.createTextNode('No scores yet this week.'));
+    empty.appendChild(document.createElement('br'));
+    empty.appendChild(document.createTextNode('Play to be the first!'));
+    children.push(empty);
   } else {
     for (let i = 0; i < G.leaderboard.length; i++) {
       const entry = G.leaderboard[i];
@@ -3604,28 +3610,28 @@ function renderLeaderboard() {
       // Match by telegram_id if available, fallback to name
       const isYou = (currentUser && entry.telegram_id && String(entry.telegram_id) === String(currentUser.id))
                      || entry.name === G.playerName;
-      let rowClass = '';
-      if (rank === 1) rowClass = 'top1';
-      else if (rank === 2) rowClass = 'top2';
-      else if (rank === 3) rowClass = 'top3';
+      let rowClass = 'lb-row';
+      if (rank === 1) rowClass += ' top1';
+      else if (rank === 2) rowClass += ' top2';
+      else if (rank === 3) rowClass += ' top3';
       if (isYou) rowClass += ' is-you';
-      
-      let rankClass = '';
-      if (rank === 1) rankClass = 'r1';
-      else if (rank === 2) rankClass = 'r2';
-      else if (rank === 3) rankClass = 'r3';
-      
+
+      let rankClass = 'lb-rank';
+      if (rank === 1) rankClass += ' r1';
+      else if (rank === 2) rankClass += ' r2';
+      else if (rank === 3) rankClass += ' r3';
+
       const medal = rank === 1 ? '\u{1F947}' : rank === 2 ? '\u{1F948}' : rank === 3 ? '\u{1F949}' : '';
-      
-      html += `<div class="lb-row ${rowClass}">`;
-      html += `<div class="lb-rank ${rankClass}">${medal || '#' + rank}</div>`;
-      html += `<div class="lb-name">${isYou ? '\u{25B6} ' : ''}${entry.name}</div>`;
-      html += `<div class="lb-score">${entry.score}</div>`;
-      html += '</div>';
+
+      const row = _makeEl('div', { cls: rowClass });
+      row.appendChild(_makeEl('div', { cls: rankClass, text: medal || '#' + rank }));
+      row.appendChild(_makeEl('div', { cls: 'lb-name', text: (isYou ? '\u{25B6} ' : '') + entry.name }));
+      row.appendChild(_makeEl('div', { cls: 'lb-score', text: String(entry.score) }));
+      children.push(row);
     }
   }
-  
-  document.getElementById('lbPanel').innerHTML = html;
+
+  document.getElementById('lbPanel').replaceChildren(...children);
 }
 
 function showToast(msg, type = 'info') {
