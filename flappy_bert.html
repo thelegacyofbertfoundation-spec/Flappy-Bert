@@ -373,6 +373,12 @@ html, body {
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.15); opacity: 0.8; }
 }
+.fx-glow-pulse { animation: fxGlowPulse 0.4s ease-out; }
+@keyframes fxGlowPulse {
+  0%   { transform: scale(1.0); text-shadow: 0 0 0 transparent; }
+  50%  { transform: scale(1.15); text-shadow: 0 0 12px currentColor; }
+  100% { transform: scale(1.0); text-shadow: 0 0 0 transparent; }
+}
 
 /* Power indicator */
 .power-bar {
@@ -1143,6 +1149,51 @@ const AudioSystem = {
     const loopDuration = melody.length * step;
     setTimeout(() => this.scheduleLoop(), (loopDuration - 0.1) * 1000);
   }
+};
+
+// ========== FX — JUICE LAYER ==========
+// Single entry point for every visible/audible "moment". Each public method
+// orchestrates particles + audio + screen effects + DOM glow.
+const FX = {
+  PARTICLE_CAP: 150,
+
+  _spawnParticles(opts) {
+    if (G.particles.length >= this.PARTICLE_CAP) return 0;
+    const count = opts.count || 1;
+    const allow = Math.min(count, this.PARTICLE_CAP - G.particles.length);
+    const speed = opts.speed != null ? opts.speed : 4;
+    for (let i = 0; i < allow; i++) {
+      G.particles.push({
+        x: opts.x, y: opts.y,
+        vx: (Math.random() - 0.5) * speed + (opts.vx0 || 0),
+        vy: (Math.random() - 0.5) * speed + (opts.vy0 || 0),
+        life: opts.life || 30, maxLife: opts.life || 30,
+        color: opts.color || '#fff',
+        size: opts.size || 2,
+        glow: !!opts.glow,
+      });
+    }
+    return allow;
+  },
+
+  _shake(intensity, frames) {
+    G.shakeFrames = Math.max(G.shakeFrames || 0, frames);
+    G.shakeIntensity = Math.max(G.shakeIntensity || 0, intensity);
+  },
+
+  _flash(alpha, color = 'white') {
+    G.flashAlpha = Math.max(G.flashAlpha || 0, alpha);
+    const el = document.getElementById('screenFlash');
+    if (el) el.style.background = color;
+  },
+
+  // Briefly glow a DOM element by toggling a class. Class auto-removed via setTimeout.
+  _glowText(domId, durationMs = 400) {
+    const el = document.getElementById(domId);
+    if (!el) return;
+    el.classList.add('fx-glow-pulse');
+    setTimeout(() => el.classList.remove('fx-glow-pulse'), durationMs);
+  },
 };
 
 // ========== AD SYSTEM (STUB — replace with real SDK after spike) ==========
