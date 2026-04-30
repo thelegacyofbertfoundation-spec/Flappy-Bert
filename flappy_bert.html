@@ -491,6 +491,37 @@ html, body {
 .toast-success { background: rgba(68,214,44,0.9); color: #fff; }
 .toast-info { background: rgba(0,229,255,0.9); color: #000; }
 .toast-warning { background: rgba(255,184,0,0.9); color: #000; }
+.magnet-pill {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  background: rgba(40, 0, 60, 0.85);
+  border: 2px solid #c04dff;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-family: var(--font);
+  font-size: 9px;
+  color: #fff;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 0 12px rgba(192, 77, 255, 0.5);
+}
+.magnet-pill-icon { font-size: 12px; }
+.magnet-pill-bar {
+  width: 60px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.magnet-pill-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #c04dff, #ffd700);
+  width: 100%;
+  transition: width 0.1s linear;
+}
 </style>
 </head>
 <body>
@@ -500,6 +531,12 @@ html, body {
 <div class="coin-display" id="coinDisplay">
   <span class="coin-icon">&#x1FA99;</span>
   <span id="coinCount">0</span>
+</div>
+
+<div id="magnetPill" class="magnet-pill" style="display:none">
+  <span class="magnet-pill-icon">&#x1F9F2;</span>
+  <span class="magnet-pill-text" id="magnetPillText">5s</span>
+  <div class="magnet-pill-bar"><div class="magnet-pill-bar-fill" id="magnetPillBarFill"></div></div>
 </div>
 
 <div id="muteBtn" onclick="toggleMute()" style="position:fixed;top:12px;left:12px;z-index:100;width:36px;height:36px;border-radius:50%;background:rgba(20,24,41,0.8);border:1px solid rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;user-select:none">&#x1F50A;</div>
@@ -2257,9 +2294,59 @@ function gameLoop(ts) {
 function update() {
   G.frameCount++;
 
-  // Magnet powerup expiry
-  if (G.powerups.magnet.active && G.frameCount >= G.powerups.magnet.expiresAt) {
-    FX.magnetExpire();
+  // Magnet powerup expiry + HUD pill update
+  const pill = document.getElementById('magnetPill');
+  if (G.powerups.magnet.active) {
+    if (pill && pill.style.display === 'none') pill.style.display = 'flex';
+    const remaining = Math.max(0, G.powerups.magnet.expiresAt - G.frameCount);
+    const remainingSec = Math.ceil(remaining / 60);
+    const txt = document.getElementById('magnetPillText');
+    if (txt) txt.textContent = remainingSec + 's';
+    const fill = document.getElementById('magnetPillBarFill');
+    if (fill) fill.style.width = (100 * remaining / MAGNET_DURATION_FRAMES) + '%';
+    if (G.frameCount >= G.powerups.magnet.expiresAt) {
+      FX.magnetExpire();
+      if (pill) pill.style.display = 'none';
+    }
+  } else if (pill && pill.style.display !== 'none') {
+    pill.style.display = 'none';
+  }
+
+  // Magnet auto-collect: force-collect on-screen coins, trail particles to Bert
+  if (G.powerups.magnet.active) {
+    for (const p of G.pipes) {
+      if (p.hasCoin && !p.coinCollected && p.x >= 0 && p.x <= G.width) {
+        p.coinCollected = true;
+        const cx = p.x + G.pipeWidth / 2;
+        const cy = p.gapY + p.moveOffset + p.gapH / 2;
+        const bonus = Math.ceil(2 * G.scoreMultiplier);
+        G.coins += bonus;
+        G.coinsEarned += bonus;
+        updateCoinDisplay();
+        FX.coinPickup(cx, cy);
+        // Spawn a trail of particles from coin position toward Bert
+        const dx = G.bert.x - cx;
+        const dy = G.bert.y - cy;
+        const steps = 6;
+        for (let s = 0; s < steps; s++) {
+          const t = s / steps;
+          FX._spawnParticles({
+            x: cx + dx * t, y: cy + dy * t, count: 1,
+            speed: 1, life: 16,
+            color: '#c04dff', size: 2, glow: true,
+          });
+        }
+        // Bonus floater
+        G.particles.push({
+          x: cx, y: cy,
+          vx: 0, vy: -1.5,
+          life: 25, maxLife: 25,
+          text: '+' + bonus,
+          color: '#ffd700',
+          size: 8,
+        });
+      }
+    }
   }
 
   // Screen shake decay
@@ -2822,7 +2909,26 @@ function render() {
 
     // Bert
     drawBert(ctx);
-    
+
+    // Magnet aura — three rotating purple arcs around Bert
+    if (G.powerups.magnet.active) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const cx = G.bert.x + (G.bertSize || 20) / 2;
+      const cy = G.bert.y + (G.bertSize || 20) / 2;
+      const rotation = (G.frameCount * Math.PI / 360) % (Math.PI * 2);
+      for (let i = 0; i < 3; i++) {
+        ctx.globalAlpha = 0.35 - i * 0.10;
+        ctx.strokeStyle = '#c04dff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const r = (G.bertSize || 20) + 8 + i * 6;
+        ctx.arc(cx, cy, r, rotation + i, rotation + i + Math.PI * 1.6);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     // Multiplier indicator during play
     if (G.scoreMultiplier > 1 && G.state === 'playing') {
       ctx.save();
