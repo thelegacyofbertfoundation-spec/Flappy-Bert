@@ -533,9 +533,32 @@ html, body {
   opacity: 1;
   transform: translateY(0);
 }
-/* TEMPORARY: until Task 23/24 wire FX.gameOverSequence, force steps visible.
-   This rule will be removed in Task 23. */
-.fx-go-step { visibility: visible; opacity: 1; transform: none; }
+.go-score-hero {
+  font-family: var(--font);
+  font-size: 64px;
+  color: #ffd700;
+  text-shadow: 0 0 12px rgba(255, 215, 0, 0.7), 0 0 4px #fff;
+  margin: 8px 0;
+  line-height: 1;
+}
+.go-score-hero.new-best {
+  background: linear-gradient(90deg, #ff4d6d, #ffb800, #4dffb8, #4da6ff, #c04dff, #ffd700);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: fxHeroShimmer 1.5s linear infinite;
+}
+@keyframes fxHeroShimmer {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+.go-score-hero.fx-punch-in { animation: fxHeroPunch 0.25s cubic-bezier(0.34,1.56,0.64,1); }
+@keyframes fxHeroPunch {
+  0%   { transform: scale(0.4) rotate(-15deg); opacity: 0; }
+  60%  { transform: scale(1.2) rotate(0deg);   opacity: 1; }
+  100% { transform: scale(1.0) rotate(0deg);   opacity: 1; }
+}
 </style>
 </head>
 <body>
@@ -1237,6 +1260,13 @@ const AudioSystem = {
   fxMagnetExpire() {
     this._sweep(880, 220, 350, 'sine', 0.14);
   },
+  fxGameOverSting() {
+    this._chord([523, 440, 349], 'sine', 1200, 0.10, { reverb: true });
+  },
+  fxHeroPunch() {
+    this._sweep(80, 40, 80, 'sine', 0.20);
+    this._sweep(2000, 4000, 40, 'square', 0.06);
+  },
 
   // Play death sound
   playDeath() {
@@ -1478,6 +1508,108 @@ const FX = {
     AudioSystem.fxMagnetExpire();
     G.powerups.magnet.active = false;
   },
+
+  _goSeqTimers: [],
+  _goSeqCanceled: false,
+  _goSeqSkipHandler: null,
+
+  gameOverSequence(stats, onDone) {
+    this._goSeqCancel();  // clear any previous run
+    this._goSeqCanceled = false;
+    this._goSeqTimers = [];
+
+    const steps = [];
+    const showStep = (name) => () => {
+      const el = document.querySelector('[data-step="' + name + '"]');
+      if (el) el.classList.add('fx-go-show');
+    };
+
+    steps.push({ at: 0,    fn: () => AudioSystem.fxGameOverSting && AudioSystem.fxGameOverSting() });
+    steps.push({ at: 200,  fn: showStep('title') });
+    steps.push({ at: 450,  fn: () => {
+      showStep('hero')();
+      const score = document.getElementById('goScore');
+      if (score) {
+        score.classList.remove('fx-punch-in');
+        void score.offsetWidth;
+        score.classList.add('fx-punch-in');
+      }
+      AudioSystem.fxHeroPunch && AudioSystem.fxHeroPunch();
+    }});
+    steps.push({ at: 700,  fn: () => this._goCountUp('goScore', stats.score, 600) });
+    steps.push({ at: 1300, fn: () => {
+      const m = document.getElementById('goMedal');
+      if (m && stats.medal) {
+        m.style.display = 'block';
+        m.style.animation = 'none'; void m.offsetWidth; m.style.animation = '';
+      }
+    }});
+    steps.push({ at: 1500, fn: () => {
+      if (stats.isNewBest) {
+        const x = window.innerWidth / 2, y = window.innerHeight / 2 - 80;
+        this._spawnParticles({ x, y, count: 30, speed: 8, life: 50, color: '#ffd700', size: 4, glow: true });
+      }
+    }});
+    steps.push({ at: 1700, fn: showStep('stats') });
+    steps.push({ at: 2050, fn: () => {
+      showStep('rewards')();
+      this._goCountUp('goCoins', stats.coinsEarned, 400, '+', ' \u{1FA99}');
+    }});
+    steps.push({ at: 2900, fn: showStep('actions') });
+
+    for (const step of steps) {
+      const id = setTimeout(() => {
+        if (!this._goSeqCanceled) step.fn();
+      }, step.at);
+      this._goSeqTimers.push(id);
+    }
+    const doneId = setTimeout(() => { if (!this._goSeqCanceled && onDone) onDone(); }, 3200);
+    this._goSeqTimers.push(doneId);
+
+    const overlay = document.getElementById('gameOverOverlay');
+    const skipHandler = () => { this._goSeqSkip(steps, onDone); };
+    if (overlay) overlay.addEventListener('pointerdown', skipHandler, { once: true });
+    this._goSeqSkipHandler = skipHandler;
+  },
+
+  _goSeqCancel() {
+    this._goSeqCanceled = true;
+    if (this._goSeqTimers) {
+      for (const id of this._goSeqTimers) clearTimeout(id);
+    }
+    this._goSeqTimers = [];
+    const overlay = document.getElementById('gameOverOverlay');
+    if (overlay && this._goSeqSkipHandler) {
+      overlay.removeEventListener('pointerdown', this._goSeqSkipHandler);
+      this._goSeqSkipHandler = null;
+    }
+  },
+
+  _goSeqSkip(steps, onDone) {
+    this._goSeqCancel();
+    for (const step of steps) {
+      try { step.fn(); } catch(e) {}
+    }
+    document.querySelectorAll('.fx-go-step').forEach(el => el.classList.add('fx-go-show'));
+    if (onDone) onDone();
+  },
+
+  _goCountUp(domId, target, durMs, prefix, suffix) {
+    prefix = prefix || '';
+    suffix = suffix || '';
+    const el = document.getElementById(domId);
+    if (!el) return;
+    const start = performance.now();
+    const targetN = Number(target) || 0;
+    const tick = (now) => {
+      const t = Math.min(1, (now - start) / durMs);
+      const eased = 1 - Math.pow(1 - t, 2);
+      const v = Math.round(targetN * eased);
+      el.textContent = prefix + v + suffix;
+      if (t < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  },
 };
 
 // ========== AD SYSTEM (STUB — replace with real SDK after spike) ==========
@@ -1612,8 +1744,9 @@ function updateCoinDisplay() {
 
 // ========== GAME MECHANICS ==========
 function startGame() {
+  if (FX && FX._goSeqCancel) FX._goSeqCancel();
   hideAllOverlays();
-  
+
   // Request anti-cheat session from server
   requestGameSession();
   G.state = 'ready';
@@ -1974,8 +2107,8 @@ function showGameOverScreen() {
   const goRankNudge = document.getElementById('goRankNudge');
   const goBadgePopup = document.getElementById('goBadgePopup');
 
-  goScore.textContent = G.score;
-  goScore.className = isNewBest ? 'go-score new-best' : 'go-score';
+  goScore.textContent = '0';
+  goScore.className = isNewBest ? 'go-score-hero new-best' : 'go-score-hero';
 
   // Best-score messaging
   if (isNewBest) {
@@ -1989,7 +2122,7 @@ function showGameOverScreen() {
     goBest.className = 'go-best';
   }
 
-  goCoins.innerHTML = '+' + G.coinsEarned + ' &#x1FA99;';
+  goCoins.textContent = '+0 \u{1FA99}';
   goLevel.textContent = 'LEVEL ' + G.level;
 
   // Combo display
@@ -2055,6 +2188,19 @@ function showGameOverScreen() {
   }
 
   showOverlay('gameOverOverlay');
+  let medal = '';
+  if (G.score >= 100) medal = 'gold';
+  else if (G.score >= 50) medal = 'silver';
+  else if (G.score >= 25) medal = 'bronze';
+
+  FX.gameOverSequence({
+    score: G.score,
+    coinsEarned: G.coinsEarned,
+    isNewBest: isNewBest,
+    level: G.level,
+    bestCombo: G.bestCombo,
+    medal: medal,
+  });
 }
 
 function updateLeaderboard(name, score) {
