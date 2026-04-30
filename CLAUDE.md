@@ -67,20 +67,32 @@ Tournament config lives in `tournaments.json` at project root, seeded into the S
 - **Production note:** the prod DB has duplicate April rows (`april-flapoff-2026` + `april-fools-flapoff-2026` from prior deploys). The `/api/tournaments/featured` priority logic picks one when both are live; ops cleanup is a `DELETE FROM tournaments WHERE id='april-flapoff-2026'` when convenient.
 
 ## Roadmap
-- **Next session — Aesthetic / creative pass.** Sub-project #2 today shipped a hot-path bug sweep (option A in the brainstorm). The next pass is option C: aesthetic improvements, juice (animations / audio polish / juice on hits), and any new feature ideas. Inputs to that brainstorm: `docs/superpowers/bugs-defer-to-june.md` (deferred from today's audit) and the tournament-DB cleanup. Start the next session with the brainstorming skill.
+- **Recently shipped — Aesthetic / creative pass (2026-04-30).** Centralised `FX` module orchestrates particles, audio, screen shake/flash, DOM glow per moment. Magnet powerup (pipe-attached, ~3% from level 2, 5s auto-collect window). Game-over redesign: sequenced reveal with hero score (rainbow shimmer on new best). Pure Web Audio synth upgrades: ADSR / chord / sweep / noiseBurst helpers + synthesised reverb. Spec: `docs/superpowers/specs/2026-04-30-aesthetic-pass-design.md`. Plan: `docs/superpowers/plans/2026-04-30-aesthetic-pass.md`. Backlog of deferred ideas: `docs/superpowers/feature-backlog.md`.
+- **Next session — re-triage `docs/superpowers/feature-backlog.md`.** Top candidates: enemy variants, slow-mo / 2x-score powerups, share-card upgrade, daily login streak, palette-nudge per level (deferred from this pass — would need to harmonise with the day-cycle sky gradient).
 
 ## Game mechanics
-- **Levels:** Every 10 pipes cleared = +1 level. Speed, gap, pipe interval scale with level, plateau at level 20.
-- **JEETS enemies:** Spawn from level 2. Cooldown system (min 3 pipes between spawns), drought ramp (5%→15%). Three sizes: normal (60%), 2x big (25%), 3x huge (15%). Unpredictable dual-wave movement with random direction changes.
+- **Levels:** Every 10 pipes cleared = +1 level. Speed, gap, pipe interval scale with level, plateau at level 20. Level transitions fire a sweep banner + fanfare.
+- **JEETS enemies:** Spawn from level 2. Cooldown system (min 3 pipes between spawns), drought ramp (5%→15%). Three sizes: normal (60%), 2x big (25%), 3x huge (15%). Unpredictable dual-wave movement with random direction changes. Spawn fires a brief red triangle warning at the right edge + low growl SFX. Dodging a JEET (it exits left without hitting) fires puff particles + whoosh.
 - **Moving pipes:** From level 8, 30% chance. Oscillate vertically.
-- **Coins:** 30% chance in pipe gaps. Near-miss bonus +3 coins. Combo bonus every 5 pipes.
-- **Shield:** ~5.6% chance, once per game. Absorbs one hit.
+- **Coins:** ~30% chance in pipe gaps (slightly reduced when magnet rolls first). Near-miss bonus +3 coins (+ ghost trail and floater). Combo bonus every 5 pipes (+ rainbow floater + arpeggio).
+- **Shield:** ~5.6% chance, once per game. Absorbs one hit. Shield-hit fires cyan shockwave + shatter SFX.
+- **Magnet powerup (new 2026-04-30):** ~3% chance per pipe gap from level 2, mutually exclusive with coin spawn. Pickup activates a 5-second window during which on-screen uncollected coins auto-collect with a particle trail to Bert. Refresh-on-pickup (no stacking). HUD pill (top-right) shows countdown text + bar. Bert displays three rotating purple aura arcs while active.
 - **Shop:** Skins (color tints) and score multipliers (1.5x, 2x). Purchased with coins.
 - **Daily challenges:** 3 random challenges, reset at UTC midnight.
 
+## FX module (since 2026-04-30)
+A single `FX` object in `flappy_bert.html` is the entry point for every visible/audible "moment". Each public method orchestrates particles + audio + screen shake/flash + DOM glow. `AudioSystem` carries the synth helpers (`_adsr`, `_chord`, `_sweep`, `_noiseBurst`, synth-reverb via `reverbSend`) plus per-event `fx*` methods. Particle soft-cap is `FX.PARTICLE_CAP = 150` — enforced at spawn time; the prior 80-cap render-loop FIFO was removed. Game-over flow: `FX.gameOverSequence(stats)` (sequenced reveal, skip-tap on overlay, cancel via `FX._goSeqCancel`).
+
+## Game-over screen (since 2026-04-30)
+- Markup is grouped into named `fx-go-step` sections (`title`, `hero`, `stats`, `rewards`, `actions`) revealed via a `setTimeout` chain over ~2.9s.
+- Hero score is 64px gold with `fxHeroPunch` scale-in; `new-best` adds a rainbow `fxHeroShimmer` background gradient.
+- Skip-tap any pointerdown on the overlay during reveal jumps to fully shown.
+- PLAY AGAIN cancels the sequence via `FX._goSeqCancel()` at the top of `startGame()`.
+- Dormant ad-gated UI (`continueWithAd`, `doubleCoinsWithAd`, `goContinueBtn`, `goDoubleCoins`, `G.adContinueUsed`, `G.adInterstitialCounter`) was removed in this pass.
+
 ## Anti-cheat / security
 - **Telegram initData HMAC validation** — verifies player identity server-side using BOT_TOKEN
-- **Anti-tamper properties** — `gravity`, `flapForce`, `baseSpeed`, `basePipeGap`, `pipeWidth`, `scoreMultiplier`, `gameSpeed`, `pipeGap`, `score`, `coins`, `combo`, `bestCombo`, `_scoreAccum` all locked with `Object.defineProperty`
+- **Anti-tamper properties** — `gravity`, `flapForce`, `baseSpeed`, `basePipeGap`, `pipeWidth`, `scoreMultiplier`, `gameSpeed`, `pipeGap`, `score`, `coins`, `combo`, `bestCombo`, `_scoreAccum` all locked with `Object.defineProperty`. Note: `G.powerups.magnet.{active,expiresAt}` is intentionally NOT locked (low risk, lock cost meaningful — see spec for rationale).
 - **Game sessions** — server-issued session IDs, reuse detection
 - **Score validation** — hard cap (500), time-based rate checks (scaled by scoreMultiplier: base 2.5/sec × mult), sessionless rejection (>30), too-fast rejection (>15). Frontend sends `scoreMultiplier` in score payload; server only accepts 1, 1.5, or 2.
 - **Rate limiting** — per-IP: sessions 10/min, scores 10/min, shares 5/min
@@ -88,8 +100,12 @@ Tournament config lives in `tournaments.json` at project root, seeded into the S
 
 ## Important notes
 - `flappy_bert.html` is a single monolithic file — all game code, styles, and markup in one place. This is intentional for Telegram Mini App simplicity.
-- The Ad system (`AdSystem`) is a stub — `isRewardedReady()` always returns false. Continue/double-coins features are dormant until a real ad SDK is integrated.
+- The Ad system (`AdSystem`) is a stub — `isRewardedReady()` always returns false. Continue/double-coins UI was removed during the 2026-04-30 aesthetic pass; only `AdSystem.init()` and `AdSystem.preload()` callsites remain (both stub-safe). When a real ad SDK is wired, re-introduce the UI.
 - `API_BASE` in the frontend is empty string — API calls use relative URLs, so the game HTML must be served from the same origin as the bot API (the `/game` endpoint handles this).
 - Canvas font "Press Start 2P" loaded from Google Fonts. Falls back to monospace if unavailable.
+- The menu shows "SEASON 3" (bumped from SEASON 2 during the 2026-04-30 aesthetic pass).
 - Never add seasonal/theme text to BertBot NFT PFP generations — breaks art style.
 - The `archives/` directory contains old versions of files. Don't modify.
+
+## Tests
+`npm test` runs `node --test tests/*.test.js`. Test mirror files in `tests/lib/` are pure-JS replicas of in-HTML logic (drift risk, accepted per the 2026-04-30 spec). Current count: 26 (15 tournaments-config + 4 spawn-cap + 4 magnet-timer + 3 sequence-runner).

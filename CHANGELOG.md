@@ -1,5 +1,65 @@
 # Flappy Bert Changelog
 
+## 2026-04-30 — Aesthetic / creative pass (Season 3)
+
+The juice update. Centralised `FX` module orchestrates particles, audio,
+screen shake/flash, and DOM glow for every in-game moment. New polish on
+all the named events (coin pickup, pipe pass, combo, near-miss, shield hit,
+level-up, JEET spawn, JEET dodge, game-over). New Magnet powerup with
+auto-collect + particle trail. Game-over screen rebuilt as a sequenced
+reveal with hero score (rainbow shimmer on new best). Pure Web Audio synth
+upgrades (ADSR, chord, sweep, noiseBurst helpers + synthesised reverb).
+Menu now shows SEASON 3.
+
+### Headline changes
+
+- **FX module + AudioSystem helpers** — single entry point for every
+  visible/audible "moment"; ADSR / chord / sweep / noiseBurst primitives
+  on AudioSystem; synthesised convolver reverb routed through `sfxGain`.
+- **Magnet powerup** — pipe-attached token (~3% per gap from level 2),
+  5-second active window with auto-collect of on-screen coins (purple
+  trail to Bert), HUD countdown pill, rotating purple aura around Bert.
+  Refresh-on-pickup; not anti-tamper-locked (low risk per spec).
+- **Game-over redesign** — sequenced reveal (~2.9s) over named groups
+  (`title` → `hero` → `stats` → `rewards` → `actions`), hero score
+  punch-in + count-up, rainbow shimmer on new-best, skip-tap on overlay,
+  PLAY-AGAIN cancels in-flight reveals.
+- **All ten polish moments wired** — coinPickup, pipePass, combo (with
+  rainbow-gradient floater), nearMiss (ghost trail + floater), shieldHit
+  (cyan shockwave), levelUp (sweep banner + fanfare), jeetSpawn (red
+  warning triangle + growl), jeetDodge (puff particles + whoosh).
+
+### Bundled cleanup
+
+- M1 deferred bug resolved — deleted `getTournamentCountdown()` stub.
+- Removed dormant ad-gated UI: `goContinueBtn`, `goDoubleCoins` markup,
+  `continueWithAd` and `doubleCoinsWithAd` functions, `G.adContinueUsed`
+  / `G.adInterstitialCounter` plumbing, the interstitial-every-4th-game
+  trigger from `showGameOverScreen`. `AdSystem` stub itself preserved.
+- Removed pre-existing 80-particle FIFO cap in render loop; the new
+  `FX.PARTICLE_CAP = 150` admission cap is now the actual ceiling.
+- New `docs/superpowers/feature-backlog.md` capturing deferred ideas:
+  enemy variants, slow-mo / 2x-score powerups, share-card upgrade, daily
+  streak, trail/accessory cosmetics, skin-reveal moment, palette nudge
+  per level (deferred — would conflict with the day-cycle sky), music
+  loop polish (deferred — was Task 28 stretch).
+
+### Out of scope (still deferred)
+
+- M3 deferred bug — unauthed `/api/leaderboard/image` and
+  `/api/player/:id/card` canvas-render endpoints (DoS surface).
+- Tournament-DB ops cleanup — `DELETE FROM tournaments WHERE id='april-flapoff-2026'`.
+
+### Tests
+
+26/26 passing (was 19): added `tests/lib/spawn-cap.js` + 4 tests, 
+`tests/lib/magnet-timer.js` + 4 tests, `tests/lib/sequence-runner.js` 
++ 3 tests. All test mirrors are pure-JS replicas of in-HTML logic; 
+drift risk acknowledged in commit bodies.
+
+Source spec: `docs/superpowers/specs/2026-04-30-aesthetic-pass-design.md`.
+Source plan: `docs/superpowers/plans/2026-04-30-aesthetic-pass.md`.
+
 ## 2026-04-30 — Hot-path bug sweep
 
 Audit + fix pass on the five hot paths (score submission, weekly leaderboard, tournament flow, mini-app rendering, Telegram admin). Audit report at `docs/superpowers/audit-reports/2026-04-30-hot-path-audit.md`. 11 findings shipped; 2 deferred to June (`docs/superpowers/bugs-defer-to-june.md`).

@@ -12,6 +12,7 @@ Findings from the 2026-04-30 hot-path audit (`docs/superpowers/audit-reports/202
 - **Proposed fix:** Delete the function and update the comment block to drop the symmetry justification.
 - **Effort:** S
 - **Why deferred:** Default Minor. No user-observable effect. Cleanup candidate for the June refactor pass.
+- **Resolved:** 2026-04-30 aesthetic pass — function and adjacent comment block deleted; the retained `getTournamentStatus` got a tightened comment.
 
 ### M3: `/api/leaderboard/image` and `/api/player/:id/card` are unauthed and unrate-limited canvas-render endpoints
 
