@@ -153,6 +153,7 @@ db.init();
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
 app.use(cors());
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '5mb' }));
 
 // Simple rate limiter — per IP, 30 requests per minute
