@@ -31,16 +31,19 @@ Summer content drop launching alongside **The Summer Session** tournament
   to a vivid-blue-crown → golden-horizon summer sky (night unchanged, so the
   day/night cycle still reads at low scores); a new sun that fades IN as day
   rises (mirror of the moon, which fades out), with soft animated rays + a warm
-  radial glow; brighter, warm-white, puffier clouds by day; menu reskinned from
-  "SEASON 3" to a gold "☀ SUMMER SEASON ☀".
+  radial glow; brighter, warm-white, puffier clouds by day; the menu season
+  label is warmed to gold and made **dynamic** — it shows "SEASON 3" until The
+  Summer Session starts (Jun 1 00:00 UTC), then auto-flips to "SEASON 4"
+  (re-checked each tick from the tournament's start time; no redeploy needed).
 
 ### Tests
 
 - +3 `tournaments-config` tests (real-file integration: Summer Session present &
   valid, live at 6/1 00:00:01, recently_ended after 9/1).
-- +5 `frenzy-timer` + +4 `homing-enemy` pure-logic replica tests (TDD). The
-  in-HTML logic mirrors these libs (drift-risk accepted per project convention).
-- Suite: 26 → 38, all green.
+- +5 `frenzy-timer` + +4 `homing-enemy` + +4 `season-label` pure-logic replica
+  tests (TDD). The in-HTML logic mirrors these libs (drift-risk accepted per
+  project convention).
+- Suite: 26 → 42, all green.
 
 ## 2026-04-30 — Aesthetic / creative pass (Season 3)
 
