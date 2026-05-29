@@ -49,7 +49,7 @@ No manual deploy step needed. Render builds from Dockerfile.
 
 ## API endpoints
 - `POST /api/session` — Start anti-cheat game session
-- `POST /api/score` — Submit score (with Telegram initData HMAC validation)
+- `POST /api/score` — Submit score (REQUIRES verified Telegram initData; identity server-derived)
 - `GET /api/leaderboard` — Weekly leaderboard JSON
 - `GET /api/player/:id` — Player stats JSON
 - `GET /api/tournament/:id` — Tournament leaderboard JSON
@@ -93,12 +93,18 @@ A single `FX` object in `flappy_bert.html` is the entry point for every visible/
 - Dormant ad-gated UI (`continueWithAd`, `doubleCoinsWithAd`, `goContinueBtn`, `goDoubleCoins`, `G.adContinueUsed`, `G.adInterstitialCounter`) was removed in this pass.
 
 ## Anti-cheat / security
-- **Telegram initData HMAC validation** — verifies player identity server-side using BOT_TOKEN
-- **Anti-tamper properties** — `gravity`, `flapForce`, `baseSpeed`, `basePipeGap`, `pipeWidth`, `scoreMultiplier`, `gameSpeed`, `pipeGap`, `score`, `coins`, `combo`, `bestCombo`, `_scoreAccum` all locked with `Object.defineProperty`. Note: `G.powerups.magnet.{active,expiresAt}` is intentionally NOT locked (low risk, lock cost meaningful — see spec for rationale).
-- **Game sessions** — server-issued session IDs, reuse detection
-- **Score validation** — hard cap (500), time-based rate checks (scaled by scoreMultiplier: base 2.5/sec × mult), sessionless rejection (>30), too-fast rejection (>15). Frontend sends `scoreMultiplier` in score payload; server only accepts 1, 1.5, or 2.
-- **Rate limiting** — per-IP: sessions 10/min, scores 10/min, shares 5/min
-- **Player bans** — admin command, checked on score submission
+**Hardened 2026-05-29 after a multi-agent red-team audit** (report: `docs/superpowers/audit-reports/2026-05-29-anticheat-redteam.md` — kept LOCAL, not committed: it documents live exploits). The trust boundary is the SERVER only — the client HTML is fully attacker-controlled, so client anti-tamper is best-effort, not a control. Enforcement logic lives in `lib/` (`score-validation`, `badge-allowlist`, `csv-cell`, `sanitize-name`), required by `bot.js`/`db.js` AND the tests (single source, no drift).
+- **Telegram initData is MANDATORY** on `/api/session`, `/api/score`, `/api/tournament/:id/score` (`requireVerifiedUser`). Identity (`telegram_id`/`first_name`/`username`) is derived ONLY from the verified payload — body fields are never trusted. HMAC keyed on `BOT_TOKEN`; `auth_date` freshness ≤24h bounds replay.
+- **Score validation** (`lib/score-validation` `scoreVerdict`) — server-trusted inputs only (body `scoreMultiplier`/`shieldUsed`/`adContinueUsed` IGNORED). HARD rejects: hard cap 500, `level` 1..1000, mandatory single-use session, `too_fast` (<2s), `score_exceeds_time` at a flat **5/sec** (covers legit 2x on 120/144Hz frame-locked play). `coins_earned` is COSMETIC (boards rank by score) so it's CLAMPED to a generous ceiling, never rejected (the combo bonus makes legit coins quadratic in score — clamping, not rejecting, avoids false-positives).
+- **Game sessions** — minted only with valid initData; single-use; 15-min TTL; `gameSessions`/`rateLimits` Maps bounded (50k, drop-oldest).
+- **Render endpoints** (`/api/leaderboard/image`, `/api/player/:id/card`) — `rateLimit(20/min)` + bounded TTL `cachedRender` (closes the synchronous-canvas DoS).
+- **Badges** — `allowedBadges` allowlist + score-gate + union-with-existing; `db.updatePlayerBadges` caps count/length; cleared on `/ban`. `express.json` 64KB global, 6MB only on `/api/share`.
+- **CSV archive** — `csvCell` RFC-4180-quotes + formula-defangs every cell; `upsertPlayer` sanitizes names.
+- **Admin** — fail-closed `authMiddleware` (503 if `API_SECRET` unset), constant-time secret compare; bot commands gated on `ADMIN_IDS` vs Telegram-authed `msg.from.id`. `/api/archives/:week` date-regex guarded.
+- **Rate limiting** — per-IP: sessions 10/min, scores 10/min, shares 5/min, render 20/min.
+- **Player bans** — admin command, checked on score submission against the verified id (evasion now needs a fresh phone-verified Telegram account).
+- **Anti-tamper (client, best-effort)** — `gravity`/`flapForce`/`scoreMultiplier`/`score`/`coins`/… locked via `Object.defineProperty`. Assume bypassable; the server validation above is the real control.
+- **Known residual / deferred:** a *verified* account can still wait ~100s on an aged session to submit the 500 cap (bounded by the cap + ban-able identity; full fix = server-side gameplay checkpoints). Audit #7 (split the polling bot into a separate process) is deferred — the render DoS is already closed by rate-limit+cache. The `web_app_data` sendData score-write was REMOVED (unvalidated, session-less; the client submits via HTTP `/api/score`).
 
 ## Important notes
 - `flappy_bert.html` is a single monolithic file — all game code, styles, and markup in one place. This is intentional for Telegram Mini App simplicity.
