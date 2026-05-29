@@ -1266,6 +1266,11 @@ const AudioSystem = {
   fxJeetDodge() {
     this._noiseBurst(200, 350, 0.10);
   },
+  fxHunterSpawn() {
+    // Rising magenta sting — distinct from the basic JEET's descending growl
+    this._sweep(120, 520, 220, 'sawtooth', 0.16);
+    this._noiseBurst(120, 1400, 0.08);
+  },
 
   fxMagnetPickup() {
     this._sweep(220, 880, 250, 'sine', 0.20, { reverb: true });
@@ -1514,6 +1519,12 @@ const FX = {
       x, y, count: 4, speed: 4, life: 24,
       color: '#222', size: 3,
     });
+  },
+
+  hunterSpawn(x, y) {
+    AudioSystem.fxHunterSpawn();
+    // Longer-lived, magenta warning — the hunter is the more dangerous variant
+    this.jeetWarnings.push({ y, life: 18, maxLife: 18, homing: true });
   },
 
   magnetPickup(x, y) {
@@ -2044,30 +2055,36 @@ function addPipe() {
     const playH = G.height - G.groundHeight;
     const speed = G.gameSpeed;
     const types = ['bat', 'ghost', 'spark'];
-    const type = types[Math.floor(Math.random() * types.length)];
+    let type = types[Math.floor(Math.random() * types.length)];
     const baseSpeed = speed * (0.6 + Math.random() * 0.8);
     const y = 60 + Math.random() * (playH - 140);
     // Random size: 60% normal, 25% big (2x), 15% huge (3x)
     const sizeRoll = Math.random();
-    const scale = sizeRoll < 0.60 ? 1 : sizeRoll < 0.85 ? 2 : 3;
+    let scale = sizeRoll < 0.60 ? 1 : sizeRoll < 0.85 ? 2 : 3;
+    // HUNTER variant: from level 4, ~30% of JEETS lazily track Bert's altitude.
+    // Never the 3x huge (unfair while homing) and slower in x so the tracking,
+    // not raw speed, is the threat.
+    const homing = G.level >= 4 && Math.random() < 0.30;
+    if (homing) { type = 'hunter'; if (scale === 3) scale = 2; }
     G.enemies.push({
       type,
+      homing,
       x: G.width + 20,
       y,
-      vx: -baseSpeed * (scale === 3 ? 0.7 : scale === 2 ? 0.85 : 1), // bigger = slower
+      vx: -baseSpeed * (homing ? 0.7 : (scale === 3 ? 0.7 : scale === 2 ? 0.85 : 1)), // bigger/hunter = slower
       baseY: y,
       age: 0,
       size: 14 * scale,
       scale,
-      amplitude: (type === 'ghost' ? 30 + Math.random() * 20 : 15 + Math.random() * 10) * (0.8 + scale * 0.3),
-      freq: type === 'ghost' ? 0.015 : 0.04 + Math.random() * 0.02,
+      amplitude: homing ? 6 : ((type === 'ghost' ? 30 + Math.random() * 20 : 15 + Math.random() * 10) * (0.8 + scale * 0.3)),
+      freq: homing ? 0.05 : (type === 'ghost' ? 0.015 : 0.04 + Math.random() * 0.02),
       // Unpredictable movement: secondary wobble + random direction changes
       freq2: 0.007 + Math.random() * 0.015,       // slow secondary wave
-      amp2: 10 + Math.random() * 25,               // secondary amplitude
-      vyDrift: (Math.random() - 0.5) * 0.4,        // slight vertical drift
+      amp2: homing ? 0 : 10 + Math.random() * 25,  // secondary amplitude (none for hunter)
+      vyDrift: (Math.random() - 0.5) * 0.4,        // slight vertical drift (unused by hunter)
       nextDirChange: 60 + Math.floor(Math.random() * 120), // frames until direction shift
     });
-    FX.jeetSpawn(G.width + 20, y);
+    if (homing) FX.hunterSpawn(G.width + 20, y); else FX.jeetSpawn(G.width + 20, y);
   } else if (G.level >= 2) {
     G._jeetDrought++;  // no spawn — increase chance for next pipe
   }
@@ -2818,16 +2835,27 @@ function update() {
     e.x += e.vx;
     e.age++;
     // Primary wave + secondary wobble for unpredictable paths
-    e.baseY += e.vyDrift || 0;
-    // Clamp baseY to playable area
     const playH = G.height - G.groundHeight;
+    if (e.homing) {
+      // HUNTER: lazily ease baseY toward Bert's altitude by a clamped step, so it
+      // tracks but stays dodgeable with a late altitude change (mirror of
+      // tests/lib/homing-enemy.js — keep TRACK_GAIN/MAX_TRACK in sync).
+      const TRACK_GAIN = 0.03, MAX_TRACK = 1.6;
+      let step = (G.bert.y - e.baseY) * TRACK_GAIN;
+      if (step > MAX_TRACK) step = MAX_TRACK;
+      if (step < -MAX_TRACK) step = -MAX_TRACK;
+      e.baseY += step;
+    } else {
+      e.baseY += e.vyDrift || 0;
+      // Random direction changes
+      if (e.nextDirChange !== undefined && e.age >= e.nextDirChange) {
+        e.vyDrift = (Math.random() - 0.5) * 0.6;
+        e.nextDirChange = e.age + 60 + Math.floor(Math.random() * 120);
+      }
+    }
+    // Clamp baseY to playable area
     if (e.baseY < 60) { e.baseY = 60; e.vyDrift = Math.abs(e.vyDrift || 0.2); }
     if (e.baseY > playH - 60) { e.baseY = playH - 60; e.vyDrift = -Math.abs(e.vyDrift || 0.2); }
-    // Random direction changes
-    if (e.nextDirChange !== undefined && e.age >= e.nextDirChange) {
-      e.vyDrift = (Math.random() - 0.5) * 0.6;
-      e.nextDirChange = e.age + 60 + Math.floor(Math.random() * 120);
-    }
     e.y = e.baseY + Math.sin(e.age * e.freq) * e.amplitude
          + Math.sin(e.age * (e.freq2 || 0.01)) * (e.amp2 || 0);
 
@@ -3107,7 +3135,7 @@ function render() {
         if (w.life <= 0) { FX.jeetWarnings.splice(i, 1); continue; }
         ctx.save();
         ctx.globalAlpha = (w.life / w.maxLife) * 0.85;
-        ctx.fillStyle = '#ff3344';
+        ctx.fillStyle = w.homing ? '#ff4dd2' : '#ff3344';
         ctx.beginPath();
         ctx.moveTo(G.width - 20, w.y);
         ctx.lineTo(G.width - 4, w.y - 8);
@@ -3121,17 +3149,37 @@ function render() {
     // Enemies
     for (const e of G.enemies) {
       ctx.save();
-      const flicker = 0.5 + Math.sin(e.age * 0.15) * 0.15;
-      ctx.globalAlpha = flicker;
-      // All enemies render as JEETS text
       ctx.translate(e.x, e.y);
       ctx.globalAlpha = 0.7 + Math.sin(e.age * 0.1) * 0.15;
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = e.homing ? '#ff4dd2' : '#ffffff';  // hunter = magenta
       const fontSize = 14 * (e.scale || 1);
       ctx.font = `bold ${fontSize}px "Press Start 2P", monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('JEETS', 0, 0);
+      // HUNTER: a faint targeting reticle + a lock-on tick pointing at Bert
+      if (e.homing) {
+        const rr = e.size + 8 + Math.sin(e.age * 0.2) * 2;
+        ctx.globalAlpha = 0.5;
+        ctx.strokeStyle = '#ff4dd2';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, rr, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-rr - 3, 0); ctx.lineTo(-rr + 3, 0);
+        ctx.moveTo(rr - 3, 0);  ctx.lineTo(rr + 3, 0);
+        ctx.moveTo(0, -rr - 3); ctx.lineTo(0, -rr + 3);
+        ctx.moveTo(0, rr - 3);  ctx.lineTo(0, rr + 3);
+        ctx.stroke();
+        const dx = G.bert.x - e.x, dy = G.bert.y - e.y;
+        const d = Math.hypot(dx, dy) || 1;
+        ctx.globalAlpha = 0.3;
+        ctx.beginPath();
+        ctx.moveTo(dx / d * rr, dy / d * rr);
+        ctx.lineTo(dx / d * (rr + 10), dy / d * (rr + 10));
+        ctx.stroke();
+      }
       ctx.restore();
     }
 
