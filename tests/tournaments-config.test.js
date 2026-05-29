@@ -157,3 +157,29 @@ test('getFeaturedTournament: when multiple recently_ended<14d, returns the most-
   assert.equal(result.id, 'newer-ended');
   assert.equal(result.featured_state, 'recently_ended');
 });
+
+// ---- The Summer Session (real config-file integration) ----
+const repoConfig = path.join(__dirname, '..', 'tournaments.json');
+
+test('tournaments.json contains a valid Summer Session entry', () => {
+  const all = loadTournamentsFromFile(repoConfig);
+  const summer = all.find(t => t.id === 'summer-session-2026');
+  assert.ok(summer, 'summer-session-2026 present in tournaments.json');
+  assert.equal(summer.name, 'The Summer Session');
+  assert.equal(summer.startTime, '2026-06-01T00:00:00Z');
+  assert.equal(summer.endTime, '2026-09-01T00:00:00Z');
+});
+
+test('Summer Session is the live featured at 2026-06-01T00:00:01Z', () => {
+  const all = loadTournamentsFromFile(repoConfig);
+  const f = getFeaturedTournament(all, new Date('2026-06-01T00:00:01Z'));
+  assert.equal(f.id, 'summer-session-2026');
+  assert.equal(f.featured_state, 'live');
+});
+
+test('Summer Session is recently_ended a few days after Sept 1', () => {
+  const all = loadTournamentsFromFile(repoConfig);
+  const f = getFeaturedTournament(all, new Date('2026-09-05T12:00:00Z'));
+  assert.equal(f.id, 'summer-session-2026');
+  assert.equal(f.featured_state, 'recently_ended');
+});

@@ -19,5 +19,12 @@
     "sponsor": "Dr. Inker LABS",
     "startTime": "2026-05-01T00:00:00Z",
     "endTime": "2026-05-31T23:59:59Z"
+  },
+  {
+    "id": "summer-session-2026",
+    "name": "The Summer Session",
+    "sponsor": "Dr. Inker LABS",
+    "startTime": "2026-06-01T00:00:00Z",
+    "endTime": "2026-09-01T00:00:00Z"
   }
 ]
