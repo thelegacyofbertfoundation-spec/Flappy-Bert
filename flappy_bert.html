@@ -4611,7 +4611,7 @@ async function submitScoreToServer(score, level, coinsEarned) {
   if (!user) return;
   const duration = Date.now() - _gameStartTime;
   try {
-    await fetch((API_BASE || '') + '/api/score', {
+    const res = await fetch((API_BASE || '') + '/api/score', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -4625,11 +4625,12 @@ async function submitScoreToServer(score, level, coinsEarned) {
         init_data: getTelegramInitData(),
       }),
     });
+    if (!res.ok) throw new Error('Score rejected (' + res.status + ')');
   } catch(e) {
     console.warn('Score submission failed:', e.message);
-    // Brief toast so player knows score may not have saved
+    // Brief toast so player knows score may not have saved (network OR server reject)
     const toast = document.createElement('div');
-    toast.textContent = 'Score save failed — check connection';
+    toast.textContent = "Score didn't save — try again";
     toast.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);background:#ff3860;color:#fff;padding:6px 14px;border-radius:8px;font-size:11px;z-index:9999;opacity:0.9';
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 3000);

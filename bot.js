@@ -539,9 +539,10 @@ bot.on('web_app_data', (msg) => {
     const data = JSON.parse(msg.web_app_data.data);
     const userId = msg.from.id;
 
-    db.upsertPlayer(userId, msg.from.first_name, msg.from.username);
-    db.submitScore(userId, data.score, data.level, data.coinsEarned);
-
+    // Scores are recorded ONLY via the validated /api/score path (mandatory
+    // initData + anti-cheat). The shipped client does not use Telegram sendData;
+    // this handler must NOT write unvalidated, session-less scores to the shared
+    // board — it only echoes a game-over message based on already-recorded state.
     const rank = db.getPlayerRank(userId);
     const rankText = rank ? `You're #${rank} this week!` : '';
 

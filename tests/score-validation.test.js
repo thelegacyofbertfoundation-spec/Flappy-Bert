@@ -28,11 +28,24 @@ test('rejects absurd / non-integer level (closes 9.2e18 corruption)', () => {
   assert.equal(scoreVerdict(ok({ level: 1001 })).reason, 'invalid_level');
 });
 
-test('rejects coins exceeding the per-score ceiling (closes unbounded coin self-credit)', () => {
-  assert.equal(scoreVerdict(ok({ score: 10, coins: 2000000000 })).reason, 'invalid_coins');
-  // within ceiling: 10*10 + 50 = 150
-  assert.equal(scoreVerdict(ok({ score: 10, coins: 150 })).valid, true);
-  assert.equal(scoreVerdict(ok({ score: 10, coins: 151 })).reason, 'invalid_coins');
+test('clamps absurd coins instead of rejecting the score (coins are cosmetic)', () => {
+  const v = scoreVerdict(ok({ score: 100, coins: 2000000000, elapsedMs: 60000 }));
+  assert.equal(v.valid, true);
+  assert.ok(v.coins < 2000000000 && v.coins > 0, 'clamped to the generous ceiling');
+});
+
+test('legit coins (incl. quadratic combo earnings) pass through unclamped', () => {
+  // a clean ~score-100 run can earn ~1300 coins (combo bonus is quadratic) —
+  // must NOT be rejected and must keep its real coins.
+  const v = scoreVerdict(ok({ score: 100, coins: 1300, elapsedMs: 60000 }));
+  assert.equal(v.valid, true);
+  assert.equal(v.coins, 1300);
+});
+
+test('coins default to 0 when absent / negative / non-integer', () => {
+  assert.equal(scoreVerdict(ok({ coins: undefined })).coins, 0);
+  assert.equal(scoreVerdict(ok({ coins: -5 })).coins, 0);
+  assert.equal(scoreVerdict(ok({ coins: 1.5 })).coins, 0);
 });
 
 test('no_session is a HARD reject for any meaningful score (closes sessionless sybil)', () => {
@@ -46,24 +59,24 @@ test('session reuse is a HARD reject (closes replay)', () => {
 
 test('too_fast is a HARD reject (n>5 under 2s)', () => {
   assert.equal(scoreVerdict(ok({ elapsedMs: 1000, score: 6 })).reason, 'too_fast');
-  // a 2-point score within 1s is under both the too_fast trigger and the 2.5/s ceiling
+  // a 2-point score within 1s is under both the too_fast trigger and the 5/s ceiling
   assert.equal(scoreVerdict(ok({ elapsedMs: 1000, score: 2 })).valid, true);
 });
 
-test('score_exceeds_time uses base 2.5/s and ignores body multiplier inflation', () => {
-  // 10s elapsed -> max ceil(10*2.5)=25
-  assert.equal(scoreVerdict(ok({ elapsedMs: 10000, score: 25 })).valid, true);
-  assert.equal(scoreVerdict(ok({ elapsedMs: 10000, score: 26 })).reason, 'score_exceeds_time');
+test('score_exceeds_time uses the base 5/s rate and ignores body multiplier inflation', () => {
+  // 10s elapsed -> max ceil(10*5)=50 (5/s covers legit 2x on 120/144Hz displays)
+  assert.equal(scoreVerdict(ok({ elapsedMs: 10000, score: 50 })).valid, true);
+  assert.equal(scoreVerdict(ok({ elapsedMs: 10000, score: 51 })).reason, 'score_exceeds_time');
 });
 
-test('reaching the 500 cap requires a real ~200s wait at base rate (no shortcut)', () => {
-  // 67s (the old multiplier+shield shortcut) is no longer enough
+test('reaching the 500 cap requires a real ~100s wait (no instant forge)', () => {
+  // an aged session is still required; the old 67s multiplier shortcut is rejected
   assert.equal(scoreVerdict(ok({ elapsedMs: 67000, score: 500 })).reason, 'score_exceeds_time');
-  // 200s: ceil(200*2.5)=500 -> exactly admissible
-  assert.equal(scoreVerdict(ok({ elapsedMs: 200000, score: 500 })).valid, true);
+  // 100s: ceil(100*5)=500 -> exactly admissible
+  assert.equal(scoreVerdict(ok({ elapsedMs: 100000, score: 500 })).valid, true);
 });
 
 test('LIMITS exposes the hardened constants', () => {
   assert.equal(LIMITS.MAX_ABSOLUTE_SCORE, 500);
-  assert.equal(LIMITS.MAX_SCORE_PER_SECOND, 2.5);
+  assert.equal(LIMITS.MAX_SCORE_PER_SECOND, 5);
 });
