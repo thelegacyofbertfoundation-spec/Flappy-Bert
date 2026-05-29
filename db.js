@@ -2,6 +2,8 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const { csvCell } = require('./lib/csv-cell');
+const { sanitizeName } = require('./lib/sanitize-name');
 
 // Use persistent disk if available (Render), otherwise local directory
 const DATA_DIR = fs.existsSync('/data') ? '/data' : __dirname;
@@ -110,6 +112,11 @@ function getNextMondayUTC() {
 // ── Player CRUD ─────────────────────────────────────────────────────
 
 function upsertPlayer(telegramId, firstName, username) {
+  // Sanitise display fields at the storage boundary (strip control chars, collapse
+  // whitespace, clamp length) so they can't corrupt the CSV archive or cards.
+  const name = sanitizeName(firstName);
+  const trimmedU = username == null ? '' : String(username).trim();
+  const uname = trimmedU === '' ? null : sanitizeName(username, 32);
   const stmt = db.prepare(`
     INSERT INTO players (telegram_id, first_name, username)
     VALUES (?, ?, ?)
@@ -117,7 +124,7 @@ function upsertPlayer(telegramId, firstName, username) {
       first_name = excluded.first_name,
       username   = excluded.username
   `);
-  stmt.run(telegramId, firstName || 'Player', username || null);
+  stmt.run(telegramId, name, uname);
 }
 
 function getPlayer(telegramId) {
@@ -125,8 +132,12 @@ function getPlayer(telegramId) {
 }
 
 function addCoins(telegramId, amount) {
+  // Backstop: ignore non-positive / absurd deltas (validateScore already bounds
+  // coins_earned per submission; this guards any other caller from corrupting it).
+  const delta = Number(amount);
+  if (!Number.isInteger(delta) || delta <= 0 || delta > 100000) return;
   db.prepare('UPDATE players SET coins = coins + ? WHERE telegram_id = ?')
-    .run(amount, telegramId);
+    .run(delta, telegramId);
 }
 
 // ── Score submission ────────────────────────────────────────────────
@@ -297,8 +308,14 @@ function isBanned(telegramId) {
 }
 
 function updatePlayerBadges(telegramId, badges) {
+  // Defensive backstop (callers already allowlist): only short string ids,
+  // hard-capped, so a malformed/oversized array can never bloat the row or the
+  // per-render JSON.parse on the public leaderboard cards.
+  const clean = (Array.isArray(badges) ? badges : [])
+    .filter((b) => typeof b === 'string' && b.length <= 32)
+    .slice(0, 16);
   db.prepare('UPDATE players SET badges = ? WHERE telegram_id = ?')
-    .run(JSON.stringify(badges), telegramId);
+    .run(JSON.stringify(clean), telegramId);
 }
 
 // ── Weekly CSV Archive ────────────────────────────────────────────────
@@ -332,11 +349,10 @@ function archiveWeek(weekStart) {
 
   // Build CSV
   const header = 'rank,telegram_id,player_name,username,best_score,games_played,max_level,total_coins,skin';
-  const rows = entries.map((e, i) => {
-    const name = (e.first_name || '').replace(/,/g, '');
-    const uname = e.username || '';
-    return `${i + 1},${e.telegram_id},${name},${uname},${e.best_score},${e.games_played},${e.max_level},${e.total_coins || 0},${e.skin || 'default'}`;
-  });
+  const rows = entries.map((e, i) => [
+    i + 1, e.telegram_id, e.first_name, e.username || '',
+    e.best_score, e.games_played, e.max_level, e.total_coins || 0, e.skin || 'default',
+  ].map(csvCell).join(','));
 
   const csv = [header, ...rows].join('\n');
   fs.writeFileSync(filepath, csv, 'utf8');

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { allowedBadges, VALID_BADGES } = require('./lib/badge-allowlist');
+const { allowedBadges, VALID_BADGES } = require('../lib/badge-allowlist');
 
 test('drops unknown / forged badge ids', () => {
   const out = allowedBadges(['immortal', 'NOT_A_BADGE', '<script>'], 500, []);

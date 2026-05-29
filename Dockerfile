@@ -18,4 +18,6 @@ COPY . .
 
 EXPOSE 3000
 
-CMD ["node", "bot.js"]
+# --max-old-space-size=400 keeps OOM a clean fast restart on the 512MB instance
+# (bounds the memory-exhaustion DoS surface alongside the in-app Map ceilings).
+CMD ["node", "--max-old-space-size=400", "bot.js"]

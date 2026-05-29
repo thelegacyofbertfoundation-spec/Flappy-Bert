@@ -29,6 +29,8 @@ const path        = require('path');
 const crypto    = require('crypto');
 const db          = require('./db');
 const { loadTournamentsFromFile, getFeaturedTournament } = require('./tournaments-config');
+const { scoreVerdict } = require('./lib/score-validation');
+const { allowedBadges } = require('./lib/badge-allowlist');
 const { renderLeaderboardCard, renderPlayerCard, renderTournamentCard } = require('./leaderboard-card');
 
 // ── Config ──────────────────────────────────────────────────────────
@@ -38,20 +40,30 @@ const PORT       = process.env.PORT || 3000;
 const API_SECRET = process.env.API_SECRET || '';
 
 // ── Anti-cheat: game sessions ────────────────────────────────────────
+// Score-validation limits now live in ./lib/score-validation (required above).
 const gameSessions = new Map(); // sessionId -> { telegramId, startedAt, used }
-const SCORE_LIMITS = {
-  MAX_SCORE_PER_SECOND: 2.5,    // generous — accounts for 2x multiplier
-  MAX_ABSOLUTE_SCORE: 500,       // hard cap — anything above is cheating
-  MIN_GAME_DURATION_MS: 2000,    // must play at least 2 seconds
-};
+const SESSION_TTL_MS = 15 * 60 * 1000;   // shortened from 30m (memory-DoS hardening)
+const MAX_SESSIONS = 50000;              // hard ceiling; evict oldest on overflow
+const MAX_RATE_KEYS = 50000;             // hard ceiling for the rate-limit Map
+const INITDATA_MAX_AGE_S = 24 * 3600;    // initData replay bound (lenient for long sessions)
 
-// Clean up old sessions every 5 minutes
+// Evict oldest sessions until under the ceiling. Map keys iterate in insertion
+// (≈ start-time) order, so the first key is the oldest — O(1) per eviction.
+function boundSessions() {
+  while (gameSessions.size >= MAX_SESSIONS) {
+    const oldest = gameSessions.keys().next().value;
+    if (oldest === undefined) break;
+    gameSessions.delete(oldest);
+  }
+}
+
+// Clean up expired sessions every minute
 setInterval(() => {
-  const cutoff = Date.now() - 30 * 60 * 1000;
+  const cutoff = Date.now() - SESSION_TTL_MS;
   for (const [id, sess] of gameSessions) {
     if (sess.startedAt < cutoff) gameSessions.delete(id);
   }
-}, 5 * 60 * 1000);
+}, 60 * 1000);
 
 function generateSessionId() {
   return crypto.randomBytes(16).toString('hex');
@@ -69,85 +81,43 @@ function validateTelegramInitData(initData) {
     const secretKey = crypto.createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest();
     const computed = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
     if (computed !== hash) return null;
+    // Freshness: reject initData older than INITDATA_MAX_AGE_S to bound replay of
+    // a captured initData string (Telegram always stamps auth_date).
+    const authDate = Number(params.get('auth_date'));
+    if (!authDate || (Date.now() / 1000 - authDate) > INITDATA_MAX_AGE_S) return null;
     const user = params.get('user');
     return user ? JSON.parse(user) : null;
   } catch(e) { return null; }
 }
 
+// Require a cryptographically-verified Telegram identity. Returns the verified
+// user object (from the signed initData), or null AFTER sending a 403 — callers
+// MUST `return` when it returns null. Identity is derived ONLY from the signed
+// payload; body-supplied telegram_id/first_name/username are never trusted.
+function requireVerifiedUser(req, res) {
+  const initData = req.body && req.body.init_data;
+  const verified = initData ? validateTelegramInitData(initData) : null;
+  if (!verified || verified.id == null) {
+    res.status(403).json({ error: 'Telegram identity required' });
+    return null;
+  }
+  return verified; // { id, first_name, username, ... } — cryptographically attested
+}
+
+// Server-side score validation. Identity is enforced separately by
+// requireVerifiedUser; this checks only score/level/coins against
+// server-trusted state (all HARD rejects; body-supplied rate inflators are
+// ignored). Decision logic lives in ./lib/score-validation (scoreVerdict).
 function validateScore(session, body) {
-  const { score, level, shieldUsed, adContinueUsed, scoreMultiplier } = body;
-  const issues = [];
-
-  // 0. Numeric guard — must be a non-negative integer (rejects strings, NaN, Infinity, fractional, negative)
-  const n = Number(score);
-  if (!Number.isInteger(n) || n < 0) {
-    console.log(`🚫 Score REJECTED: score=${JSON.stringify(score)} not a non-negative integer`);
-    return { valid: false, reason: 'invalid_score' };
-  }
-  // Use n for downstream comparisons (also catches the string-coercion edge case).
-
-  // 1. Hard score cap — only true hard reject
-  if (n > SCORE_LIMITS.MAX_ABSOLUTE_SCORE) {
-    console.log(`🚫 Score REJECTED: score=${n} exceeds hard cap`);
-    return { valid: false, reason: 'exceeds_cap' };
-  }
-
-  // 2. Session checks — log but allow if missing (network can fail)
-  if (!session) {
-    issues.push('no_session');
-  } else {
-    if (session.used) {
-      issues.push('session_reused');
-    }
-
-    // Time-based checks only if we have a session
-    const elapsed = Date.now() - session.startedAt;
-    if (elapsed < SCORE_LIMITS.MIN_GAME_DURATION_MS && n > 5) {
-      issues.push('too_fast');
-    }
-
-    // Scale rate limit by score multiplier (1x, 1.5x, or 2x)
-    const mult = (scoreMultiplier === 1.5 || scoreMultiplier === 2) ? scoreMultiplier : 1;
-    let maxScorePerSecond = SCORE_LIMITS.MAX_SCORE_PER_SECOND * mult;
-
-    // Further relax when shield/ad continue used
-    if (shieldUsed && adContinueUsed) {
-      maxScorePerSecond *= 1.5;
-    } else if (shieldUsed) {
-      maxScorePerSecond *= 1.2;
-    } else if (adContinueUsed) {
-      maxScorePerSecond *= 1.2;
-    }
-
-    const maxScoreForTime = Math.ceil((elapsed / 1000) * maxScorePerSecond);
-    if (n > maxScoreForTime && n > 10) {
-      issues.push('score_exceeds_time');
-    }
-  }
-
-  if (issues.length > 0) {
-    const tid = session ? session.telegramId : 'unknown';
-    console.log(`⚠️  Score flagged [${tid}]: score=${n} issues=[${issues.join(',')}]`);
-  }
-
-  // Reject replay attacks
-  if (issues.includes('session_reused') && n > 20) {
-    return { valid: false, reason: 'session_reused' };
-  }
-  // Reject sessionless high scores (curl attacks)
-  if (issues.includes('no_session') && n > 30) {
-    return { valid: false, reason: 'no_session_high_score' };
-  }
-  // Reject impossibly fast scores
-  if (issues.includes('too_fast') && n > 15) {
-    return { valid: false, reason: 'too_fast' };
-  }
-  // Reject scores exceeding time-based limit
-  if (issues.includes('score_exceeds_time') && n > 30) {
-    return { valid: false, reason: 'score_exceeds_time' };
-  }
-
-  return { valid: true, issues, flagged: issues.length > 0 };
+  const elapsedMs = session ? (Date.now() - session.startedAt) : 0;
+  return scoreVerdict({
+    score: body.score,
+    level: body.level,
+    coins: body.coins_earned,
+    hasSession: !!session,
+    sessionUsed: !!(session && session.used),
+    elapsedMs,
+  });
 }
 
 // Escape Telegram Markdown V1 special characters in user/operator-supplied strings.
@@ -180,7 +150,10 @@ const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
 app.use(cors());
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '5mb' }));
+// Body-size: tiny globally; only /api/share needs room for a base64 PNG upload.
+const smallJson = express.json({ limit: '64kb' });
+const largeJson = express.json({ limit: '6mb' });
+app.use((req, res, next) => (req.path === '/api/share' ? largeJson : smallJson)(req, res, next));
 
 // Simple rate limiter — per IP, 30 requests per minute
 const rateLimits = new Map();
@@ -188,6 +161,11 @@ function rateLimit(limit = 30, windowMs = 60000) {
   return (req, res, next) => {
     const key = req.ip;
     const now = Date.now();
+    // Bound the Map: evict the oldest key when at the ceiling (memory-DoS guard).
+    if (rateLimits.size >= MAX_RATE_KEYS && !rateLimits.has(key)) {
+      const oldest = rateLimits.keys().next().value;
+      if (oldest !== undefined) rateLimits.delete(oldest);
+    }
     const entry = rateLimits.get(key) || { count: 0, resetAt: now + windowMs };
     if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + windowMs; }
     entry.count++;
@@ -385,8 +363,9 @@ bot.onText(/\/ban(?:\s+(\d+))?/, (msg, match) => {
     // Permanently ban — blocks all future score submissions
     db.banPlayer(targetId, 'banned by admin');
     
-    // Remove all existing scores
+    // Remove all existing scores + forged badges
     db.removeAllPlayerScores(targetId);
+    db.updatePlayerBadges(targetId, []);
     const tournaments = db.getAllTournaments();
     tournaments.forEach(t => db.removeTournamentScores(targetId, t.id));
     
@@ -622,7 +601,9 @@ function authMiddleware(req, res, next) {
   if (!API_SECRET) {
     return res.status(503).json({ error: 'Admin endpoints disabled (API_SECRET not configured)' });
   }
-  if (req.headers['x-api-secret'] !== API_SECRET) {
+  const provided = Buffer.from(String(req.headers['x-api-secret'] || ''));
+  const expected = Buffer.from(API_SECRET);
+  if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   next();
@@ -630,88 +611,69 @@ function authMiddleware(req, res, next) {
 
 // POST /api/session — Start a game session (called when game starts)
 app.post('/api/session', rateLimit(10, 60000), (req, res) => {
-  const { telegram_id, init_data } = req.body;
-  if (!telegram_id) return res.status(400).json({ error: 'telegram_id required' });
+  const verified = requireVerifiedUser(req, res);
+  if (!verified) return;
 
-  // Validate Telegram identity if initData provided
-  if (init_data) {
-    const verified = validateTelegramInitData(init_data);
-    if (!verified || String(verified.id) !== String(telegram_id)) {
-      return res.status(403).json({ error: 'Invalid Telegram identity' });
-    }
-  }
-
+  boundSessions();
   const sessionId = generateSessionId();
   gameSessions.set(sessionId, {
     id: sessionId,
-    telegramId: telegram_id,
+    telegramId: verified.id,
     startedAt: Date.now(),
     used: false,
   });
-  
+
   res.json({ session_id: sessionId, server_time: Date.now() });
 });
 
 // POST /api/score
-// Body: { telegram_id, first_name, username?, score, level, coins_earned, session_id, duration }
+// Body: { init_data (required), score, level, coins_earned, session_id, badges? }
+// Identity (telegram_id / first_name / username) is derived from the verified init_data.
 app.post('/api/score', rateLimit(10, 60000), (req, res) => {
   try {
-    const {
-      telegram_id, first_name, username,
-      score, level, coins_earned,
-      session_id, duration,
-      badges, shieldUsed, adContinueUsed, scoreMultiplier
-    } = req.body;
+    const verified = requireVerifiedUser(req, res);
+    if (!verified) return;
+    const telegram_id = verified.id;
 
-    if (!telegram_id || score == null) {
-      return res.status(400).json({ error: 'telegram_id and score are required' });
+    const { score, level, coins_earned, session_id, badges } = req.body;
+    if (score == null) {
+      return res.status(400).json({ error: 'score is required' });
     }
 
-    // Validate Telegram identity if initData provided
-    if (req.body.init_data) {
-      const verified = validateTelegramInitData(req.body.init_data);
-      if (!verified || String(verified.id) !== String(telegram_id)) {
-        return res.status(403).json({ error: 'Invalid Telegram identity' });
-      }
-    }
-
-    // Check if player is banned
+    // Check if player is banned (by verified identity)
     if (db.isBanned(telegram_id)) {
       return res.status(403).json({ error: 'Player is banned' });
     }
 
-    // Validate with anti-cheat
+    // Session must belong to this verified user
     const session = gameSessions.get(session_id);
-
-    // Check session belongs to this user
     if (session && session.telegramId !== telegram_id) {
       console.log(`⚠️  Session hijack attempt: session=${session_id} owner=${session.telegramId} submitter=${telegram_id}`);
       return res.status(403).json({ error: 'Invalid session' });
     }
 
-    const validation = validateScore(session, { score, level, coins_earned, duration, shieldUsed, adContinueUsed, scoreMultiplier });
-
+    const validation = validateScore(session, { score, level, coins_earned });
     if (!validation.valid) {
-      console.log(`🚫 Score REJECTED [${telegram_id}]: score=${score} reason=${validation.reason || validation.issues.join(',')}`);
+      console.log(`🚫 Score REJECTED [${telegram_id}]: score=${score} reason=${validation.reason}`);
       return res.status(403).json({ error: 'Score rejected', reason: validation.reason });
     }
 
-    // Mark session as used
+    // Mark session as used (single-use)
     if (session) session.used = true;
 
-    db.upsertPlayer(telegram_id, first_name || anonName(telegram_id), username || null);
-    // validateScore approved — safe to coerce to integer for DB write
-    const validatedScore = Number(score);
-    db.submitScore(telegram_id, validatedScore, level || 1, coins_earned || 0);
+    // Identity comes from the verified initData; db.upsertPlayer sanitizes the name.
+    db.upsertPlayer(telegram_id, verified.first_name || anonName(telegram_id), verified.username || null);
+    db.submitScore(telegram_id, Number(score), validation.level, validation.coins);
 
-    // Store badges if provided
-    if (badges && Array.isArray(badges)) {
-      db.updatePlayerBadges(telegram_id, badges);
+    // Badges: allowlist + score-gate + union-with-existing (no forgery).
+    if (Array.isArray(badges)) {
+      let existing = [];
+      try { existing = JSON.parse(db.getPlayer(telegram_id)?.badges || '[]'); } catch (e) { existing = []; }
+      db.updatePlayerBadges(telegram_id, allowedBadges(badges, Number(score), existing));
     }
 
     const rank = db.getPlayerRank(telegram_id);
-
-    res.json({ ok: true, rank, weekStart: db.getWeekStart(), flagged: validation.flagged });
+    res.json({ ok: true, rank, weekStart: db.getWeekStart(), flagged: false });
   } catch (err) {
     console.error('API score error:', err);
     res.status(500).json({ error: 'Internal error' });
@@ -729,16 +691,36 @@ app.get('/api/leaderboard', (req, res) => {
   });
 });
 
+// Bounded TTL cache for rendered PNGs — repeated requests hit memory, not the
+// synchronous canvas renderer, closing the render-flood DoS. With the per-IP
+// rate limit below, highlight-rotation can't force unbounded renders either.
+const renderCache = new Map(); // key -> { buf, exp }
+const RENDER_CACHE_TTL_MS = 60 * 1000;
+const RENDER_CACHE_MAX = 200;
+function cachedRender(key, produce) {
+  const now = Date.now();
+  const hit = renderCache.get(key);
+  if (hit && hit.exp > now) return hit.buf;
+  const buf = produce();
+  renderCache.set(key, { buf, exp: now + RENDER_CACHE_TTL_MS });
+  while (renderCache.size > RENDER_CACHE_MAX) {
+    const oldest = renderCache.keys().next().value;
+    if (oldest === undefined) break;
+    renderCache.delete(oldest);
+  }
+  return buf;
+}
+
 // GET /api/leaderboard/image?highlight=TELEGRAM_ID
-app.get('/api/leaderboard/image', (req, res) => {
+app.get('/api/leaderboard/image', rateLimit(20, 60000), (req, res) => {
   try {
-    const entries = db.getWeeklyLeaderboard(50);
     const highlightId = parseInt(req.query.highlight) || null;
-    const pngBuffer = renderLeaderboardCard(entries, {
+    const key = `lb:${db.getWeekStart()}:${highlightId || 0}`;
+    const pngBuffer = cachedRender(key, () => renderLeaderboardCard(db.getWeeklyLeaderboard(50), {
       highlightId,
       resetIn:   getResetCountdown(),
       weekLabel:  getWeekLabel(),
-    });
+    }));
     res.set('Content-Type', 'image/png');
     res.set('Cache-Control', 'public, max-age=60');
     res.send(pngBuffer);
@@ -760,22 +742,27 @@ app.get('/api/player/:id', (req, res) => {
 });
 
 // GET /api/player/:id/card
-app.get('/api/player/:id/card', (req, res) => {
+app.get('/api/player/:id/card', rateLimit(20, 60000), (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid id' });
     const player  = db.getPlayer(id);
     if (!player) return res.status(404).json({ error: 'Player not found' });
-    const weekly  = db.getPlayerWeeklyBest(id);
-    const rank    = db.getPlayerRank(id);
-    const allTime = db.getAllTimeStats(id);
-    const statsData = {
-      best_score:    weekly?.best_score || 0,
-      games_played:  weekly?.games_played || 0,
-      max_level:     weekly?.max_level || 0,
-      all_time_best: allTime?.all_time_best || 0,
-    };
-    const pngBuffer = renderPlayerCard(player, statsData, rank);
+    const key = `card:${db.getWeekStart()}:${id}`;
+    const pngBuffer = cachedRender(key, () => {
+      const weekly  = db.getPlayerWeeklyBest(id);
+      const rank    = db.getPlayerRank(id);
+      const allTime = db.getAllTimeStats(id);
+      const statsData = {
+        best_score:    weekly?.best_score || 0,
+        games_played:  weekly?.games_played || 0,
+        max_level:     weekly?.max_level || 0,
+        all_time_best: allTime?.all_time_best || 0,
+      };
+      return renderPlayerCard(player, statsData, rank);
+    });
     res.set('Content-Type', 'image/png');
+    res.set('Cache-Control', 'public, max-age=60');
     res.send(pngBuffer);
   } catch (err) {
     console.error('API player card error:', err);
@@ -885,56 +872,42 @@ app.post('/api/tournament/:id/score', rateLimit(10, 60000), (req, res) => {
       return res.status(400).json({ error: 'Tournament not active' });
     }
 
-    const {
-      telegram_id, first_name, username,
-      score, level, coins_earned,
-      session_id, duration,
-      badges, shieldUsed, adContinueUsed, scoreMultiplier,
-      init_data,
-    } = req.body;
+    const verified = requireVerifiedUser(req, res);
+    if (!verified) return;
+    const telegram_id = verified.id;
 
-    if (!telegram_id || score == null) {
-      return res.status(400).json({ error: 'telegram_id and score required' });
-    }
-
-    // Validate Telegram identity if initData provided (mirrors /api/score)
-    if (init_data) {
-      const verified = validateTelegramInitData(init_data);
-      if (!verified || String(verified.id) !== String(telegram_id)) {
-        return res.status(403).json({ error: 'Invalid Telegram identity' });
-      }
+    const { score, level, coins_earned, session_id } = req.body;
+    if (score == null) {
+      return res.status(400).json({ error: 'score required' });
     }
 
     if (db.isBanned(telegram_id)) {
       return res.status(403).json({ error: 'Player is banned' });
     }
 
-    // Session ownership check
+    // Session must belong to this verified user
     const session = gameSessions.get(session_id);
     if (session && session.telegramId !== telegram_id) {
       console.log(`⚠️  Tournament session hijack attempt: session=${session_id} owner=${session.telegramId} submitter=${telegram_id}`);
       return res.status(403).json({ error: 'Invalid session' });
     }
 
-    // Full anti-cheat validation (numeric guard, hard cap, time-based, session-reuse)
-    const validation = validateScore(session, { score, level, coins_earned, duration, shieldUsed, adContinueUsed, scoreMultiplier });
+    // Full anti-cheat validation (numeric guard, hard cap, bounds, time-based, session reuse)
+    const validation = validateScore(session, { score, level, coins_earned });
     if (!validation.valid) {
       console.log(`🚫 Tournament score REJECTED [${telegram_id}]: score=${score} reason=${validation.reason}`);
       return res.status(403).json({ error: 'Score rejected', reason: validation.reason });
     }
 
-    // Mark session as used
+    // Mark session as used (single-use)
     if (session) session.used = true;
 
-    // Upsert the player so they appear on the leaderboard's INNER JOIN
-    db.upsertPlayer(telegram_id, first_name || anonName(telegram_id), username || null);
-
-    // Coerce score to integer for DB write (validateScore approved)
-    const validatedScore = Number(score);
-    db.submitTournamentScore(req.params.id, telegram_id, validatedScore, level || 1, coins_earned || 0);
+    // Identity from verified initData; db.upsertPlayer sanitizes the name.
+    db.upsertPlayer(telegram_id, verified.first_name || anonName(telegram_id), verified.username || null);
+    db.submitTournamentScore(req.params.id, telegram_id, Number(score), validation.level, validation.coins);
 
     const rank = db.getTournamentPlayerRank(req.params.id, telegram_id);
-    res.json({ ok: true, rank, flagged: validation.flagged });
+    res.json({ ok: true, rank, flagged: false });
   } catch (err) {
     console.error('API tournament score error:', err);
     res.status(500).json({ error: 'Internal error' });
@@ -943,6 +916,9 @@ app.post('/api/tournament/:id/score', rateLimit(10, 60000), (req, res) => {
 
 // GET /api/archives/:week — Download a specific week's CSV
 app.get('/api/archives/:week', (req, res) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(req.params.week)) {
+    return res.status(400).json({ error: 'Invalid week' });
+  }
   const filepath = db.getArchivePath(req.params.week);
   if (!filepath) return res.status(404).json({ error: 'Archive not found' });
   res.download(filepath);

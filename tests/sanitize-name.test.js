@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { sanitizeName } = require('./lib/sanitize-name');
+const { sanitizeName } = require('../lib/sanitize-name');
 
 test('passes a normal name through', () => {
   assert.equal(sanitizeName('Alice'), 'Alice');

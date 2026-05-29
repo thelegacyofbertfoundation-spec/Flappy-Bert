@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { csvCell } = require('./lib/csv-cell');
+const { csvCell } = require('../lib/csv-cell');
 
 test('passes through a plain value unchanged', () => {
   assert.equal(csvCell('Alice'), 'Alice');

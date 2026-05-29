@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { scoreVerdict, LIMITS } = require('./lib/score-validation');
+const { scoreVerdict, LIMITS } = require('../lib/score-validation');
 
 const ok = (over = {}) => ({ score: 10, level: 2, coins: 5, hasSession: true, sessionUsed: false, elapsedMs: 10000, ...over });
 
