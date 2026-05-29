@@ -522,6 +522,15 @@ html, body {
   width: 100%;
   transition: width 0.1s linear;
 }
+.frenzy-pill {
+  top: 52px;
+  background: rgba(60, 44, 0, 0.85);
+  border-color: #ffd700;
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.55);
+}
+.frenzy-pill-bar-fill {
+  background: linear-gradient(90deg, #ffb800, #fff3b0);
+}
 .fx-go-step {
   visibility: hidden;
   opacity: 0;
@@ -574,6 +583,12 @@ html, body {
   <span class="magnet-pill-icon">&#x1F9F2;</span>
   <span class="magnet-pill-text" id="magnetPillText">5s</span>
   <div class="magnet-pill-bar"><div class="magnet-pill-bar-fill" id="magnetPillBarFill"></div></div>
+</div>
+
+<div id="frenzyPill" class="magnet-pill frenzy-pill" style="display:none">
+  <span class="magnet-pill-icon">&#x2728;</span>
+  <span class="magnet-pill-text"><b>2X</b> <span id="frenzyPillText">8s</span></span>
+  <div class="magnet-pill-bar"><div class="magnet-pill-bar-fill frenzy-pill-bar-fill" id="frenzyPillBarFill"></div></div>
 </div>
 
 <div id="muteBtn" onclick="toggleMute()" style="position:fixed;top:12px;left:12px;z-index:100;width:36px;height:36px;border-radius:50%;background:rgba(20,24,41,0.8);border:1px solid rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;user-select:none">&#x1F50A;</div>
@@ -747,6 +762,7 @@ const MENU_B64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAYsAAACgCAYAAAD9
 
 // ========== GAME STATE ==========
 const MAGNET_DURATION_FRAMES = 60 * 5;  // 5 seconds at 60fps
+const FRENZY_DURATION_FRAMES = 60 * 8;  // 2x-score FRENZY window: 8 seconds at 60fps
 
 const G = {
   state: 'menu', // menu, playing, gameover, shop, leaderboard
@@ -828,7 +844,8 @@ const G = {
   shieldsUsedTotal: 0,
   nearMissesThisGame: 0,
   // Powerups
-  powerups: { magnet: { active: false, expiresAt: 0 } },
+  powerups: { magnet: { active: false, expiresAt: 0 }, frenzy: { active: false, expiresAt: 0 } },
+  _frenzyPrevMult: 1,  // scoreMultiplier to restore when FRENZY expires
 };
 
 // ========== SHOP ITEMS ==========
@@ -1260,6 +1277,17 @@ const AudioSystem = {
   fxMagnetExpire() {
     this._sweep(880, 220, 350, 'sine', 0.14);
   },
+  fxFrenzyPickup() {
+    this._sweep(330, 1320, 220, 'sine', 0.20, { reverb: true });
+    this._noiseBurst(80, 2000, 0.10);
+  },
+  fxFrenzyActivate() {
+    // Bright major triad up an octave — celebratory "score on!" sting
+    this._chord([523, 659, 784, 1046], 'square', 360, 0.06, { reverb: true });
+  },
+  fxFrenzyExpire() {
+    this._sweep(1046, 523, 300, 'triangle', 0.12);
+  },
   fxGameOverSting() {
     this._chord([523, 440, 349], 'sine', 1200, 0.10, { reverb: true });
   },
@@ -1507,6 +1535,33 @@ const FX = {
   magnetExpire() {
     AudioSystem.fxMagnetExpire();
     G.powerups.magnet.active = false;
+  },
+
+  frenzyPickup(x, y) {
+    AudioSystem.fxFrenzyPickup();
+    this.shockwave = { x, y, t: 0, max: 250, color: '#ffd700' };
+    this._flash(0.22, '#ffd700');
+    this._spawnParticles({
+      x, y, count: 14, speed: 6, life: 32,
+      color: '#ffd700', size: 3, glow: true,
+    });
+  },
+
+  frenzyActivate() {
+    AudioSystem.fxFrenzyActivate();
+    // Save the multiplier to restore only on a FRESH activation; a refresh
+    // pickup extends the window without clobbering the saved value.
+    if (!G.powerups.frenzy.active) G._frenzyPrevMult = G.scoreMultiplier;
+    G.scoreMultiplier = 2;  // anti-tamper setter accepts {1, 1.5, 2}
+    G.powerups.frenzy.active = true;
+    G.powerups.frenzy.expiresAt = G.frameCount + FRENZY_DURATION_FRAMES;
+  },
+
+  frenzyExpire() {
+    AudioSystem.fxFrenzyExpire();
+    G.powerups.frenzy.active = false;
+    const prev = G._frenzyPrevMult;
+    G.scoreMultiplier = (prev === 1.5 || prev === 2) ? prev : 1;
   },
 
   _goSeqTimers: [],
@@ -1782,6 +1837,9 @@ function startGame() {
   G.readyBobFrame = 0;
   G.powerups.magnet.active = false;
   G.powerups.magnet.expiresAt = 0;
+  G.powerups.frenzy.active = false;
+  G.powerups.frenzy.expiresAt = 0;
+  G._frenzyPrevMult = 1;
   
   // Apply equipped multiplier and consume 1 use
   if (G.equippedMultiplier && G.ownedMultipliers[G.equippedMultiplier] > 0) {
@@ -1957,17 +2015,21 @@ function addPipe() {
     hasCoin: false,
     hasShield: false,
     hasMagnet: false,
+    hasFrenzy: false,
     coinCollected: false,
     shieldCollected: false,
     magnetCollected: false,
+    frenzyCollected: false,
   });
 
   const pipe = G.pipes[G.pipes.length - 1];
   const roll = Math.random();
   if (G.level >= 2 && roll < 0.03) {
-    pipe.hasMagnet = true;  // ~3% magnet from level 2+; mutex with coin/shield
+    pipe.hasMagnet = true;  // ~3% magnet from level 2+ (band 0–0.03); mutex
+  } else if (G.level >= 3 && roll < 0.055) {
+    pipe.hasFrenzy = true;  // ~2.5% 2x-score FRENZY from level 3+ (band 0.03–0.055)
   } else if (roll < 0.3) {
-    pipe.hasCoin = true;  // 30% chance coin
+    pipe.hasCoin = true;  // ~24.5% coin (band 0.055–0.3)
   } else if (roll < 0.3 + 0.7 * 0.08 && !G.hasShield && !G.shieldSpawnedThisGame) {
     pipe.hasShield = true;  // ~5.6% effective chance shield
     G.shieldSpawnedThisGame = true;
@@ -2061,6 +2123,9 @@ function gameOver() {
   document.getElementById('comboDisplay').style.display = 'none';
 
   G.powerups.magnet.active = false;
+  // Frenzy: just stop tracking; leave scoreMultiplier as-is so the submitted
+  // multiplier stays honest (2 if active at death, else the restored prev).
+  G.powerups.frenzy.active = false;
 }
 
 function finalGameOver() {
@@ -2412,6 +2477,23 @@ function update() {
     pill.style.display = 'none';
   }
 
+  // Frenzy (2x-score) powerup expiry + HUD pill update
+  const fpill = document.getElementById('frenzyPill');
+  if (G.powerups.frenzy.active) {
+    if (fpill && fpill.style.display === 'none') fpill.style.display = 'flex';
+    const fremaining = Math.max(0, G.powerups.frenzy.expiresAt - G.frameCount);
+    const ftxt = document.getElementById('frenzyPillText');
+    if (ftxt) ftxt.textContent = Math.ceil(fremaining / 60) + 's';
+    const ffill = document.getElementById('frenzyPillBarFill');
+    if (ffill) ffill.style.width = (100 * fremaining / FRENZY_DURATION_FRAMES) + '%';
+    if (G.frameCount >= G.powerups.frenzy.expiresAt) {
+      FX.frenzyExpire();
+      if (fpill) fpill.style.display = 'none';
+    }
+  } else if (fpill && fpill.style.display !== 'none') {
+    fpill.style.display = 'none';
+  }
+
   // Magnet auto-collect: force-collect on-screen coins, trail particles to Bert
   if (G.powerups.magnet.active) {
     for (const p of G.pipes) {
@@ -2706,6 +2788,23 @@ function update() {
       }
     }
 
+    // Frenzy (2x-score) pickup
+    if (p.hasFrenzy && !p.frenzyCollected) {
+      const fcx = p.x + G.pipeWidth / 2;
+      const fcy = p.gapY + p.moveOffset + p.gapH / 2;
+      const dist = Math.hypot(G.bert.x - fcx, G.bert.y - fcy);
+      if (dist < 25) {
+        p.frenzyCollected = true;
+        FX.frenzyPickup(fcx, fcy);
+        FX.frenzyActivate();
+        G.particles.push({
+          x: fcx, y: fcy, vx: 0, vy: -1.5,
+          life: 30, maxLife: 30, text: '2X SCORE!', color: '#ffd700', size: 9,
+        });
+        try { navigator.vibrate && navigator.vibrate([20, 10, 30]); } catch(e) {}
+      }
+    }
+
     // Remove off-screen
     if (p.x < -G.pipeWidth - 10) {
       G.pipes.splice(i, 1);
@@ -2968,6 +3067,36 @@ function render() {
         ctx.lineWidth = 2;
         ctx.strokeRect(mx - 9, bobY - 9, 18, 18);
       }
+      // Draw frenzy (2x-score) token in pipe gap
+      if (p.hasFrenzy && !p.frenzyCollected) {
+        const fx = p.x + G.pipeWidth / 2;
+        const fy = p.gapY + p.moveOffset + p.gapH / 2;
+        const bob = fy + Math.sin(G.frameCount * 0.08) * 2;
+        // Glow halo (additive)
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.4 + Math.sin(G.frameCount * 0.1) * 0.2;
+        ctx.fillStyle = '#ffd700';
+        ctx.beginPath();
+        ctx.arc(fx, bob, 18, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        // Gold "2X" badge
+        ctx.save();
+        ctx.fillStyle = '#1a1206';
+        ctx.beginPath();
+        ctx.arc(fx, bob, 11, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#ffd700';
+        ctx.stroke();
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 9px "Press Start 2P", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('2X', fx, bob + 1);
+        ctx.restore();
+      }
     }
     
     // JEET spawn warnings (right edge red triangles, fading)
@@ -3023,6 +3152,29 @@ function render() {
         ctx.beginPath();
         const r = (G.bertSize || 20) + 8 + i * 6;
         ctx.arc(cx, cy, r, rotation + i, rotation + i + Math.PI * 1.6);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Frenzy aura — golden rotating sun-rays around Bert while 2x active
+    if (G.powerups.frenzy.active) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const cx = G.bert.x;
+      const cy = G.bert.y;
+      const baseR = (G.bertSize || 20) * 0.7;
+      const rot = G.frameCount * 0.04;
+      ctx.strokeStyle = '#ffd700';
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.5 + Math.sin(G.frameCount * 0.2) * 0.2;
+      for (let i = 0; i < 8; i++) {
+        const a = rot + i * (Math.PI / 4);
+        const r1 = baseR + 4;
+        const r2 = baseR + 12 + Math.sin(G.frameCount * 0.15 + i) * 3;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+        ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
         ctx.stroke();
       }
       ctx.restore();
