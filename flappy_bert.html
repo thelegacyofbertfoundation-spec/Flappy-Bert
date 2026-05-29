@@ -76,20 +76,20 @@ html, body {
 }
 .menu-season {
   font-size: clamp(9px, 2.2vw, 13px);
-  color: #00e5ff;
+  color: #ffce5a;
   letter-spacing: 6px;
   margin-bottom: 6px;
-  text-shadow: 0 0 12px rgba(0,229,255,0.6), 0 0 30px rgba(0,229,255,0.3);
+  text-shadow: 0 0 12px rgba(255,200,70,0.6), 0 0 30px rgba(255,160,40,0.3);
   animation: seasonGlow 3s ease-in-out infinite;
-  border: 1px solid rgba(0,229,255,0.3);
+  border: 1px solid rgba(255,200,70,0.35);
   display: inline-block;
   padding: 4px 16px;
   border-radius: 4px;
-  background: rgba(0,229,255,0.05);
+  background: rgba(255,200,70,0.06);
 }
 @keyframes seasonGlow {
-  0%, 100% { text-shadow: 0 0 12px rgba(0,229,255,0.6), 0 0 30px rgba(0,229,255,0.3); border-color: rgba(0,229,255,0.3); }
-  50% { text-shadow: 0 0 20px rgba(0,229,255,0.9), 0 0 50px rgba(0,229,255,0.5); border-color: rgba(0,229,255,0.6); }
+  0%, 100% { text-shadow: 0 0 12px rgba(255,200,70,0.6), 0 0 30px rgba(255,160,40,0.3); border-color: rgba(255,200,70,0.35); }
+  50% { text-shadow: 0 0 20px rgba(255,210,90,0.9), 0 0 50px rgba(255,170,50,0.5); border-color: rgba(255,200,70,0.65); }
 }
 .menu-subtitle {
   font-size: clamp(8px, 2vw, 12px);
@@ -688,7 +688,7 @@ html, body {
     <img id="menuBertImg" style="width: clamp(100px,25vw,160px); image-rendering: pixelated; filter: drop-shadow(0 0 20px rgba(255,107,53,0.4));">
   </div>
   <div class="menu-title">FLAPPY BERT</div>
-  <div class="menu-season">SEASON 3</div>
+  <div class="menu-season">&#x2600; SUMMER SEASON &#x2600;</div>
   <div class="menu-subtitle">FLAP TO EARN</div>
   <button class="btn btn-primary" onclick="startGame()">&#9654; PLAY</button>
   <button class="btn btn-secondary" onclick="showShop()">&#x1F6D2; SHOP</button>
@@ -2978,12 +2978,14 @@ function render() {
   const skyGrad = ctx.createLinearGradient(0, 0, 0, h);
   function lerpC(a, b, t) { return (a + (b - a) * t) | 0; }
   // Night: dark blues → Dawn: warm oranges/purples
-  const r0 = lerpC(5, 25, t), g0 = lerpC(8, 12, t), b0 = lerpC(24, 45, t);
-  const r1 = lerpC(16, 60, t), g1 = lerpC(24, 30, t), b1 = lerpC(56, 80, t);
-  const r2 = lerpC(36, 100, t), g2 = lerpC(48, 55, t), b2 = lerpC(104, 110, t);
-  const r3 = lerpC(26, 80, t), g3 = lerpC(32, 45, t), b3 = lerpC(64, 90, t);
+  // Summer day targets (t=1): vivid blue crown fading to a warm golden horizon.
+  // Night targets (t=0) unchanged so the day/night cycle still reads at low scores.
+  const r0 = lerpC(5, 95, t),  g0 = lerpC(8, 165, t),  b0 = lerpC(24, 240, t);
+  const r1 = lerpC(16, 190, t), g1 = lerpC(24, 205, t), b1 = lerpC(56, 230, t);
+  const r2 = lerpC(36, 255, t), g2 = lerpC(48, 205, t), b2 = lerpC(104, 150, t);
+  const r3 = lerpC(26, 255, t), g3 = lerpC(32, 180, t), b3 = lerpC(64, 115, t);
   skyGrad.addColorStop(0, `rgb(${r0},${g0},${b0})`);
-  skyGrad.addColorStop(0.4, `rgb(${lerpC(16,40,t)},${lerpC(24,28,t)},${lerpC(56,65,t)})`);
+  skyGrad.addColorStop(0.4, `rgb(${lerpC(16,135,t)},${lerpC(24,190,t)},${lerpC(56,245,t)})`);
   skyGrad.addColorStop(0.7, `rgb(${r1},${g1},${b1})`);
   skyGrad.addColorStop(0.85, `rgb(${r2},${g2},${b2})`);
   skyGrad.addColorStop(1, `rgb(${r3},${g3},${b3})`);
@@ -3015,9 +3017,44 @@ function render() {
   ctx.restore();
   }
   
-  // Clouds (slow drifting)
+  // Sun — fades IN as day rises (mirror of the moon, which fades out). Summer glow.
+  const sunAlpha = Math.max(0, Math.min(1, (t - 0.15) / 0.6));
+  if (sunAlpha > 0.04) {
+    const sunX = w * 0.22;
+    const sunY = h * 0.14;
+    const sunR = Math.min(30, w * 0.07);
+    ctx.save();
+    ctx.globalAlpha = sunAlpha;
+    // Soft animated rays (additive)
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'rgba(255,210,120,0.5)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 12; i++) {
+      const a = (G.frameCount * 0.005) + i * (Math.PI / 6);
+      const r1 = sunR + 6;
+      const r2 = sunR + 16 + Math.sin(G.frameCount * 0.03 + i) * 4;
+      ctx.beginPath();
+      ctx.moveTo(sunX + Math.cos(a) * r1, sunY + Math.sin(a) * r1);
+      ctx.lineTo(sunX + Math.cos(a) * r2, sunY + Math.sin(a) * r2);
+      ctx.stroke();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.shadowColor = 'rgba(255,200,90,0.6)';
+    ctx.shadowBlur = 30;
+    const sunGrad = ctx.createRadialGradient(sunX - 4, sunY - 4, 0, sunX, sunY, sunR);
+    sunGrad.addColorStop(0, 'rgba(255,250,210,1)');
+    sunGrad.addColorStop(0.5, 'rgba(255,215,110,0.95)');
+    sunGrad.addColorStop(1, 'rgba(255,170,60,0.7)');
+    ctx.fillStyle = sunGrad;
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Clouds (slow drifting) — brighter, warm-white and puffier by day (summer)
   const cloudOffset = (G.state === 'playing' || G.state === 'dying' || G.state === 'continuing') ? G.frameCount * 0.15 : G.frameCount * 0.05;
-  ctx.fillStyle = 'rgba(150,170,220,0.04)';
+  ctx.fillStyle = `rgba(255,250,240,${(0.03 + t * 0.15).toFixed(3)})`;
   for (let i = 0; i < 5; i++) {
     const cx = ((i * 200 + 80) - cloudOffset * (0.3 + i * 0.1)) % (w + 200) - 60;
     const cy = 40 + i * 35 + Math.sin(i * 2.5) * 20;
