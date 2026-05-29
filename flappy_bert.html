@@ -1572,7 +1572,8 @@ const FX = {
     AudioSystem.fxFrenzyExpire();
     G.powerups.frenzy.active = false;
     const prev = G._frenzyPrevMult;
-    G.scoreMultiplier = (prev === 1.5 || prev === 2) ? prev : 1;
+    // Mirror tests/lib/frenzy-timer.js VALID_MULTS — keep the allowed set in lockstep
+    G.scoreMultiplier = [1, 1.5, 2].includes(prev) ? prev : 1;
   },
 
   _goSeqTimers: [],
