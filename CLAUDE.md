@@ -60,23 +60,25 @@ No manual deploy step needed. Render builds from Dockerfile.
 ## Tournaments (data-driven since 2026-04-29)
 Tournament config lives in `tournaments.json` at project root, seeded into the SQLite `tournaments` table on bot startup via `tournaments-config.js` (idempotent — `INSERT OR IGNORE` on `id`). Adding a new tournament = append to the JSON and restart. No code changes.
 
-- **Active config:** Champions Flap-off (ended), April Fools Flap-off 2026 (Apr 1–30 UTC), May The Flap Be With You (May 1–31 UTC).
+- **Active config:** Champions Flap-off (ended), April Fools Flap-off 2026 (Apr 1–30 UTC), May The Flap Be With You (May 1–31 UTC), The Summer Session (Jun 1 – Sep 1 UTC, 3-month flagship).
 - **Featured selection:** `/api/tournaments/featured` returns the prominent tournament for the home button using priority: live > upcoming<7d > recently_ended<14d. The mini-app's smart home button drives off `featured_state` (gold / silver / bronze).
 - **Three-section overlay:** the tournament screen renders Live / Upcoming / Past sections with conditional rendering. Past entries are collapsible.
 - **Persistent archive entry:** the menu has a "📜 PAST TOURNAMENTS" link that always opens the overlay scrolled to the past section, even when no tournament is featured.
 - **Production note:** the prod DB has duplicate April rows (`april-flapoff-2026` + `april-fools-flapoff-2026` from prior deploys). The `/api/tournaments/featured` priority logic picks one when both are live; ops cleanup is a `DELETE FROM tournaments WHERE id='april-flapoff-2026'` when convenient.
 
 ## Roadmap
+- **Recently shipped — The Summer Session Update (2026-05-29).** Homing HUNTER JEET (tracks altitude, lvl 4+), 2x-score FRENZY powerup (8s, restores prior shop mult), summer aesthetic (warm day sky + sun + brighter day clouds + gold "SUMMER SEASON" menu), and The Summer Session tournament (Jun 1 – Sep 1 2026). Spec: `docs/superpowers/specs/2026-05-29-summer-session-update-design.md`. Plan: `docs/superpowers/plans/2026-05-29-summer-session-update.md`.
 - **Recently shipped — Aesthetic / creative pass (2026-04-30).** Centralised `FX` module orchestrates particles, audio, screen shake/flash, DOM glow per moment. Magnet powerup (pipe-attached, ~3% from level 2, 5s auto-collect window). Game-over redesign: sequenced reveal with hero score (rainbow shimmer on new best). Pure Web Audio synth upgrades: ADSR / chord / sweep / noiseBurst helpers + synthesised reverb. Spec: `docs/superpowers/specs/2026-04-30-aesthetic-pass-design.md`. Plan: `docs/superpowers/plans/2026-04-30-aesthetic-pass.md`. Backlog of deferred ideas: `docs/superpowers/feature-backlog.md`.
-- **Next session — re-triage `docs/superpowers/feature-backlog.md`.** Top candidates: enemy variants, slow-mo / 2x-score powerups, share-card upgrade, daily login streak, palette-nudge per level (deferred from this pass — would need to harmonise with the day-cycle sky gradient).
+- **Next session — re-triage `docs/superpowers/feature-backlog.md`.** Remaining top candidates: slow-mo powerup (deferred — gameSpeed-lock integration cost), a second enemy (laser JEET, once HUNTER is validated), share-card upgrade, daily login streak, palette-nudge per level.
 
 ## Game mechanics
 - **Levels:** Every 10 pipes cleared = +1 level. Speed, gap, pipe interval scale with level, plateau at level 20. Level transitions fire a sweep banner + fanfare.
-- **JEETS enemies:** Spawn from level 2. Cooldown system (min 3 pipes between spawns), drought ramp (5%→15%). Three sizes: normal (60%), 2x big (25%), 3x huge (15%). Unpredictable dual-wave movement with random direction changes. Spawn fires a brief red triangle warning at the right edge + low growl SFX. Dodging a JEET (it exits left without hitting) fires puff particles + whoosh.
+- **JEETS enemies:** Spawn from level 2. Cooldown system (min 3 pipes between spawns), drought ramp (5%→15%). Three sizes: normal (60%), 2x big (25%), 3x huge (15%). Unpredictable dual-wave movement with random direction changes. Spawn fires a brief red triangle warning at the right edge + low growl SFX. Dodging a JEET (it exits left without hitting) fires puff particles + whoosh. From level 4, ~30% of JEET spawns are the **homing HUNTER** variant (`type:'hunter'`, `homing:true`): magenta, size 1–2 only, slower in x; `baseY` lazily eases toward Bert (TRACK_GAIN 0.03, MAX_TRACK 1.6 px/frame) plus a small wobble, so it partially tracks on screen and is dodgeable with a late altitude change. Telegraphed by a longer magenta warning + rising sting; rendered with a targeting reticle + a lock-on tick pointing at Bert. Mirror logic: `tests/lib/homing-enemy.js`.
 - **Moving pipes:** From level 8, 30% chance. Oscillate vertically.
 - **Coins:** ~30% chance in pipe gaps (slightly reduced when magnet rolls first). Near-miss bonus +3 coins (+ ghost trail and floater). Combo bonus every 5 pipes (+ rainbow floater + arpeggio).
 - **Shield:** ~5.6% chance, once per game. Absorbs one hit. Shield-hit fires cyan shockwave + shatter SFX.
 - **Magnet powerup (new 2026-04-30):** ~3% chance per pipe gap from level 2, mutually exclusive with coin spawn. Pickup activates a 5-second window during which on-screen uncollected coins auto-collect with a particle trail to Bert. Refresh-on-pickup (no stacking). HUD pill (top-right) shows countdown text + bar. Bert displays three rotating purple aura arcs while active.
+- **Frenzy powerup (new 2026-05-29):** 2x-score window. ~2.5% chance per pipe gap from level 3, mutually exclusive with magnet/coin/shield (spawn band 0.03–0.055). Pickup sets `scoreMultiplier = 2` for 8s (`FRENZY_DURATION_FRAMES`), restoring the prior multiplier (`G._frenzyPrevMult`) on expiry. Refresh-on-pickup (no stacking; prev mult saved only on a fresh activate). Gold HUD pill stacked below the magnet pill (`top:52px`; both can be active at once), gold "2X" pipe token, rotating golden sun-ray aura. `scoreMultiplier` stays in {1,1.5,2} so it's anti-tamper + server compliant; `gameOver` stops tracking without altering the multiplier (honest submit). Mirror logic: `tests/lib/frenzy-timer.js`.
 - **Shop:** Skins (color tints) and score multipliers (1.5x, 2x). Purchased with coins.
 - **Daily challenges:** 3 random challenges, reset at UTC midnight.
 
@@ -103,9 +105,9 @@ A single `FX` object in `flappy_bert.html` is the entry point for every visible/
 - The Ad system (`AdSystem`) is a stub — `isRewardedReady()` always returns false. Continue/double-coins UI was removed during the 2026-04-30 aesthetic pass; only `AdSystem.init()` and `AdSystem.preload()` callsites remain (both stub-safe). When a real ad SDK is wired, re-introduce the UI.
 - `API_BASE` in the frontend is empty string — API calls use relative URLs, so the game HTML must be served from the same origin as the bot API (the `/game` endpoint handles this).
 - Canvas font "Press Start 2P" loaded from Google Fonts. Falls back to monospace if unavailable.
-- The menu shows "SEASON 3" (bumped from SEASON 2 during the 2026-04-30 aesthetic pass).
+- The menu shows a gold "☀ SUMMER SEASON ☀" (was "SEASON 3" before the 2026-05-29 Summer Session update). The `.menu-season` label + `seasonGlow` keyframes are warm-gold themed.
 - Never add seasonal/theme text to BertBot NFT PFP generations — breaks art style.
 - The `archives/` directory contains old versions of files. Don't modify.
 
 ## Tests
-`npm test` runs `node --test tests/*.test.js`. Test mirror files in `tests/lib/` are pure-JS replicas of in-HTML logic (drift risk, accepted per the 2026-04-30 spec). Current count: 26 (15 tournaments-config + 4 spawn-cap + 4 magnet-timer + 3 sequence-runner).
+`npm test` runs `node --test tests/*.test.js`. Test mirror files in `tests/lib/` are pure-JS replicas of in-HTML logic (drift risk, accepted per the 2026-04-30 spec). Current count: 38 (18 tournaments-config + 4 spawn-cap + 4 magnet-timer + 3 sequence-runner + 5 frenzy-timer + 4 homing-enemy).

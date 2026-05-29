@@ -7,20 +7,29 @@ when starting the next creative pass.
 ## Gameplay
 
 ### New enemy variants
-A fast laser-beam JEET, or a homing JEET that lazily tracks Bert.
+**Homing variant SHIPPED 2026-05-29** as the HUNTER JEET (lazily tracks Bert's
+altitude, lvl 4+). The fast **laser-beam JEET** is still open — revisit once the
+HUNTER is validated in the wild.
 Touches enemy AI / movement code. Spec needed for spawn rules and
 balance against existing JEETS.
 
-### Slow-mo powerup
+### Slow-mo powerup — DEFERRED (still open)
+Considered for 2026-05-29 but deferred: confirmed the anti-tamper `gameSpeed`
+setter rejects values below `baseSpeed`, so slow-mo can't mutate `gameSpeed` —
+every read site (pipes, enemies, ground, Bert physics, spawn timer) needs a
+slow_mo factor branch. Highest integration / core-feel risk; not worth pairing
+with a difficulty-raising enemy in the same pass.
+
 Pipes/JEETS slow to ~50% for ~3s. Best skill-expression moment.
 Touches every speed/movement multiplier (anti-tamper-locked
 `gameSpeed` is in the lock list — every consumer needs a slow_mo
 factor branch). Higher integration cost than magnet was.
 
-### 2x score window powerup
-Score multiplier doubles for ~10 pipes. Cleanest mechanically (existing
-`scoreMultiplier` infra including server-side validation that allows
-1, 1.5, 2). Least visually exciting of the three powerup options.
+### 2x score window powerup — SHIPPED 2026-05-29
+Shipped as the **FRENZY** powerup (8-second `scoreMultiplier = 2` window,
+restores the prior shop multiplier on expiry; gold HUD pill + sun-ray aura).
+As predicted it reused the `scoreMultiplier` infra cleanly; the only wrinkle was
+save/restoring the shop multiplier and giving it a dedicated stacked HUD pill.
 
 ## Cosmetics
 

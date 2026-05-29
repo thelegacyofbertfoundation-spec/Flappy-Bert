@@ -1,5 +1,47 @@
 # Flappy Bert Changelog
 
+## 2026-05-29 — The Summer Session Update
+
+Summer content drop launching alongside **The Summer Session** tournament
+(2026-06-01 00:00 → 2026-09-01 00:00 UTC, 3 months). A new homing enemy, a new
+2x-score powerup, and a harmonized summer glow-up of the world + menu.
+
+### Headline changes
+
+- **The Summer Session tournament** — data-driven entry in `tournaments.json`
+  (`summer-session-2026`, Jun 1 – Sep 1 2026, sponsor Dr. Inker LABS). Shows in
+  the Upcoming section now, becomes the live featured at 6/1 00:00 UTC, then
+  recently_ended for 14 days after 9/1. No code change (bot seeds on restart).
+- **Homing HUNTER JEET** — a new enemy variant that lazily tracks Bert's
+  altitude. Spawns from level 4 (~30% of JEET spawns), size 1–2 only, slower in
+  x so the tracking — not raw speed — is the threat. `baseY` eases toward Bert
+  (TRACK_GAIN 0.03, MAX_TRACK 1.6 px/frame) with a small wobble, so it partially
+  tracks on screen and stays dodgeable with a late altitude change. Magenta
+  telegraph (longer-lived warning) + rising sting; magenta label + targeting
+  reticle + a lock-on tick pointing at Bert. Reuses existing enemy collision/
+  dodge (shield absorbs).
+- **2x-Score FRENZY powerup** — pipe-attached token (~2.5% per gap from level 3,
+  mutually exclusive with magnet/coin/shield). Sets `scoreMultiplier = 2` for an
+  8-second window, restoring the prior (shop) multiplier on expiry. Gold HUD
+  countdown pill stacked below the magnet pill (both can be active), a gold "2X"
+  pipe token, a rotating golden sun-ray aura around Bert, dedicated pickup/
+  activate/expire SFX. Anti-tamper compliant (the locked setter only accepts
+  {1, 1.5, 2}); the multiplier submitted at game-over stays honest.
+- **Summer aesthetic** — the day endpoints of the sky gradient warmed/brightened
+  to a vivid-blue-crown → golden-horizon summer sky (night unchanged, so the
+  day/night cycle still reads at low scores); a new sun that fades IN as day
+  rises (mirror of the moon, which fades out), with soft animated rays + a warm
+  radial glow; brighter, warm-white, puffier clouds by day; menu reskinned from
+  "SEASON 3" to a gold "☀ SUMMER SEASON ☀".
+
+### Tests
+
+- +3 `tournaments-config` tests (real-file integration: Summer Session present &
+  valid, live at 6/1 00:00:01, recently_ended after 9/1).
+- +5 `frenzy-timer` + +4 `homing-enemy` pure-logic replica tests (TDD). The
+  in-HTML logic mirrors these libs (drift-risk accepted per project convention).
+- Suite: 26 → 38, all green.
+
 ## 2026-04-30 — Aesthetic / creative pass (Season 3)
 
 The juice update. Centralised `FX` module orchestrates particles, audio,
