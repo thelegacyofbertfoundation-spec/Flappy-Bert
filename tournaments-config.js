@@ -13,7 +13,7 @@ function validateTournament(obj) {
   if (Number.isNaN(Date.parse(obj.startTime))) return false;
   if (Number.isNaN(Date.parse(obj.endTime))) return false;
   if (Date.parse(obj.endTime) <= Date.parse(obj.startTime)) return false;
-  // Optional fields (Beat-My-Ghost-style reset + prizes). When present they must be well-formed.
+  // Optional fields (tournament score-reset boundary + prize ladder). When present they must be well-formed.
   if (obj.scoreResetAt !== undefined) {
     if (typeof obj.scoreResetAt !== 'string' || Number.isNaN(Date.parse(obj.scoreResetAt))) return false;
   }
