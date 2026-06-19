@@ -736,6 +736,7 @@ html, body {
       <div class="go-level" id="goLevel">LEVEL 1</div>
       <div id="goCombo" style="font-size:7px;color:#ffb800;margin:4px 0;display:none"></div>
       <div id="goMultiplier" style="font-size:7px;color:var(--accent3);margin:4px 0;display:none"></div>
+      <div id="goChallenge" style="font-size:8px;margin:5px 0;display:none"></div>
     </div>
     <div class="go-rewards-bottom fx-go-step" data-step="rewards">
       <div class="go-coins" id="goCoins">+0 &#x1FA99;</div>
@@ -1896,7 +1897,10 @@ function startGame() {
   G.powerups.frenzy.active = false;
   G.powerups.frenzy.expiresAt = 0;
   G._frenzyPrevMult = 1;
-  
+  // Ghost challenge: reset the per-run pass-moment and show the target pill
+  if (G.ghost) G.ghost.passed = false;
+  updateGhostPill();
+
   // Apply equipped multiplier and consume 1 use
   if (G.equippedMultiplier && G.ownedMultipliers[G.equippedMultiplier] > 0) {
     const m = MULTIPLIERS.find(x => x.id === G.equippedMultiplier);
@@ -2273,6 +2277,21 @@ function showGameOverScreen() {
   } else {
     goMultiplier.style.display = 'none';
   }
+
+  // Ghost challenge result line
+  const goChallenge = document.getElementById('goChallenge');
+  if (G.ghost && goChallenge) {
+    const beat = G.score > G.ghost.score;
+    const who = G.ghost.name || 'them';
+    goChallenge.style.display = 'block';
+    goChallenge.style.color = beat ? 'var(--gold)' : 'var(--accent3)';
+    goChallenge.textContent = beat
+      ? `\u{1F3C6} YOU BEAT ${who}!  ${G.score} \u{203A} ${G.ghost.score}`
+      : `\u{1F3AF} So close — ${G.score}/${G.ghost.score}. Try again!`;
+  } else if (goChallenge) {
+    goChallenge.style.display = 'none';
+  }
+  updateGhostPill();
 
   // Rank nudge (uses cached leaderboard data)
   goRankNudge.style.display = 'none';
@@ -2724,6 +2743,12 @@ function update() {
       const scoreGain = Math.floor(G._scoreAccum);
       G._scoreAccum -= scoreGain;
       G.score += scoreGain;
+      if (G.ghost && !G.ghost.passed && G.score > G.ghost.score) {
+        G.ghost.passed = true;
+        FX._floater('PASSED ' + (G.ghost.name || 'them') + '!', window.innerWidth / 2, window.innerHeight * 0.4, 'fx-near-miss-floater');
+        AudioSystem.fxLevelUp();
+        updateGhostPill();
+      }
       G.coinsEarned += scoreGain;
       G.combo++;
       if (G.combo > G.bestCombo) G.bestCombo = G.combo;
@@ -4676,7 +4701,7 @@ function parseGhost(param) {
 function updateGhostPill() {
   const pill = document.getElementById('ghostPill');
   if (!pill) return;
-  if (!G.ghost || G.state !== 'playing') { pill.style.display = 'none'; return; }
+  if (!G.ghost || (G.state !== 'playing' && G.state !== 'ready')) { pill.style.display = 'none'; return; }
   const name = G.ghost.name || '…';
   document.getElementById('ghostPillText').textContent = name + '  ' + G.ghost.score;
   pill.style.display = 'flex';
