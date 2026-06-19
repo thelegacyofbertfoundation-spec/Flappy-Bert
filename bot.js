@@ -204,6 +204,17 @@ for (const t of seededTournaments) {
 }
 console.log(`Loaded ${seededTournaments.length} tournament(s) from config`);
 
+// One-time data cleanup: a prior deploy seeded a DUPLICATE April tournament
+// (`april-flapoff-2026`) alongside the canonical `april-fools-flapoff-2026` (the
+// one in tournaments.json, re-seeded above and KEPT), so "PAST TOURNAMENTS"
+// showed two April entries. Remove the orphan. Idempotent + self-healing: a
+// no-op once the row is gone, and it re-removes the orphan if a bad seed ever
+// recreates it. deleteTournament clears the orphan's child scores first (FK is ON).
+const _aprilDup = db.deleteTournament('april-flapoff-2026');
+if (_aprilDup.tournament > 0) {
+  console.log(`🧹  Removed duplicate tournament april-flapoff-2026 (+${_aprilDup.scores} orphan score row(s))`);
+}
+
 console.log('🐕  Flappy Bert Bot starting…');
 
 // ── Helper: time until next Monday 00:00 UTC ────────────────────────
