@@ -294,6 +294,19 @@ function resetTournamentScores(tournamentId) {
   db.prepare('DELETE FROM tournament_scores WHERE tournament_id = ?').run(tournamentId);
 }
 
+// Remove a tournament row entirely (used for ops cleanup of duplicate/orphan
+// tournaments). foreign_keys is ON with no ON DELETE CASCADE, so the child
+// score rows MUST be deleted first — wrapped in a transaction so it's atomic.
+// Returns { scores, tournament } = rows deleted from each table.
+function deleteTournament(id) {
+  const tx = db.transaction((tid) => {
+    const scores = db.prepare('DELETE FROM tournament_scores WHERE tournament_id = ?').run(tid).changes;
+    const tournament = db.prepare('DELETE FROM tournaments WHERE id = ?').run(tid).changes;
+    return { scores, tournament };
+  });
+  return tx(id);
+}
+
 function banPlayer(telegramId, reason) {
   db.prepare('INSERT OR REPLACE INTO banned_players (telegram_id, reason) VALUES (?, ?)')
     .run(telegramId, reason || 'cheating');
@@ -402,6 +415,7 @@ module.exports = {
   removeAllPlayerScores,
   removeTournamentScores,
   resetTournamentScores,
+  deleteTournament,
   banPlayer,
   unbanPlayer,
   isBanned,
