@@ -603,7 +603,8 @@ function drawClockIcon(ctx, cx, cy, r, colour) {
  * Render a tournament leaderboard card.
  */
 function renderTournamentCard(entries, options = {}) {
-  const count  = Math.min(entries.length, MAX_ENTRIES);
+  const nPrize = Array.isArray(options.prizes) ? options.prizes.length : 0;
+  const count  = Math.min(Math.max(entries.length, nPrize), MAX_ENTRIES);
   const height = HEADER_H + 20 + count * (ROW_H + ROW_GAP) + FOOTER_H + PAD * 2;
 
   const canvas = createCanvas(WIDTH, height);
@@ -678,11 +679,12 @@ function renderTournamentCard(entries, options = {}) {
   const startY = HEADER_H + 32;
   for (let i = 0; i < count; i++) {
     const entry = entries[i];
+    const prize = i < nPrize ? options.prizes[i] : null;
     const rank  = i + 1;
     const y     = startY + i * (ROW_H + ROW_GAP);
 
     // Row background
-    const isHighlighted = options.highlightId && entry.telegram_id === options.highlightId;
+    const isHighlighted = options.highlightId && entry && entry.telegram_id === options.highlightId;
     if (isHighlighted) {
       ctx.fillStyle = 'rgba(255,215,0,0.12)';
     } else if (rank <= 3) {
@@ -715,37 +717,59 @@ function renderTournamentCard(entries, options = {}) {
       ctx.fillText(`#${rank}`, PAD + 32, rowCenterY);
     }
 
-    // Avatar dot
-    const skinColour = SKIN_COLOURS[entry.skin || 'default'] || C.accent;
-    const dotX = PAD + 68;
-    ctx.beginPath();
-    ctx.arc(dotX, rowCenterY, 10, 0, Math.PI * 2);
-    ctx.fillStyle = skinColour;
-    ctx.fill();
+    // Avatar dot (entries only \u2014 empty prize slots have no avatar)
+    if (entry) {
+      const skinColour = SKIN_COLOURS[entry.skin || 'default'] || C.accent;
+      const dotX = PAD + 68;
+      ctx.beginPath();
+      ctx.arc(dotX, rowCenterY, 10, 0, Math.PI * 2);
+      ctx.fillStyle = skinColour;
+      ctx.fill();
+    }
 
-    // Player name
+    // Player name (or an "up for grabs" placeholder for an empty prize slot)
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    const prefix = isHighlighted ? '\u25B6 ' : '';
-    ctx.font = isHighlighted ? 'bold 13px sans-serif' : '13px sans-serif';
-    ctx.fillStyle = isHighlighted ? C.gold : C.text;
-    const name = prefix + (entry.first_name || entry.username || 'Player');
-    ctx.fillText(name.substring(0, 18), PAD + 86, rowCenterY);
+    if (entry) {
+      const prefix = isHighlighted ? '\u25B6 ' : '';
+      ctx.font = isHighlighted ? 'bold 13px sans-serif' : '13px sans-serif';
+      ctx.fillStyle = isHighlighted ? C.gold : C.text;
+      const name = prefix + (entry.first_name || entry.username || 'Player');
+      ctx.fillText(name.substring(0, prize != null ? 14 : 18), PAD + 86, rowCenterY);
+    } else {
+      ctx.font = 'italic 13px sans-serif';
+      ctx.fillStyle = C.textDim;
+      ctx.fillText('\u2014 up for grabs \u2014', PAD + 86, rowCenterY);
+    }
 
-    // Score
-    ctx.textAlign = 'right';
-    ctx.font = 'bold 16px sans-serif';
-    ctx.fillStyle = rank <= 3 ? C.gold : C.accent2;
-    ctx.fillText(String(entry.best_score), WIDTH - PAD - 120, rowCenterY);
+    // Prize (gold) \u2014 drawn just left of the SCORE column for prize rows
+    if (prize != null) {
+      ctx.save();
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillStyle = C.gold;
+      ctx.fillText('$' + prize, WIDTH - PAD - 175, rowCenterY);
+      ctx.restore();
+    }
 
-    // Level
-    ctx.font = '12px sans-serif';
-    ctx.fillStyle = C.success;
-    ctx.fillText(String(entry.max_level || 1), WIDTH - PAD - 54, rowCenterY);
+    // Score / Level / Games (entries only \u2014 empty slots leave these blank)
+    if (entry) {
+      // Score
+      ctx.textAlign = 'right';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillStyle = rank <= 3 ? C.gold : C.accent2;
+      ctx.fillText(String(entry.best_score), WIDTH - PAD - 120, rowCenterY);
 
-    // Games
-    ctx.fillStyle = C.accent3;
-    ctx.fillText(String(entry.games_played || 0), WIDTH - PAD - 8, rowCenterY);
+      // Level
+      ctx.font = '12px sans-serif';
+      ctx.fillStyle = C.success;
+      ctx.fillText(String(entry.max_level || 1), WIDTH - PAD - 54, rowCenterY);
+
+      // Games
+      ctx.fillStyle = C.accent3;
+      ctx.fillText(String(entry.games_played || 0), WIDTH - PAD - 8, rowCenterY);
+    }
   }
 
   // Footer
