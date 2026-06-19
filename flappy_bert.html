@@ -747,6 +747,9 @@ html, body {
         <button class="btn btn-primary" style="min-width:120px" onclick="startGame()">&#x1F504; PLAY AGAIN</button>
       </div>
       <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:6px">
+        <button class="btn btn-gold" style="font-size:8px;padding:7px 12px" onclick="challengeFriend()">&#x1F3AF; CHALLENGE A FRIEND</button>
+      </div>
+      <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:6px">
         <button class="btn btn-secondary" style="font-size:7px;padding:6px 10px" onclick="showMenu()">&#x1F3E0; MENU</button>
         <button class="btn btn-secondary" style="font-size:7px;padding:6px 10px" onclick="showShop()">&#x1F6D2; SHOP</button>
         <button class="btn btn-secondary" style="font-size:7px;padding:6px 10px" onclick="showLeaderboard()">&#x1F3C6; RANKS</button>
@@ -968,6 +971,7 @@ function init() {
   document.getElementById('menuBertImg').src = MENU_B64;
   
   loadData();
+  loadConfig();
   updateCoinDisplay();
   resizeCanvas();
   generateStars();
@@ -4600,6 +4604,27 @@ async function shareScoreCard() {
   } catch(e) {
     showScoreCardInline(c.toDataURL('image/png'));
   }
+}
+
+let _botUsername = null;
+async function loadConfig() {
+  try { const r = await fetch((API_BASE || '') + '/api/config'); const d = await r.json(); _botUsername = d.botUsername || null; } catch (e) {}
+}
+
+async function challengeFriend() {
+  const user = getTelegramUser();
+  if (!user || !_botUsername) return shareScoreCard(); // graceful fallback
+  const param = 'g_' + user.id + '_' + (G.score | 0);
+  const link = 'https://t.me/' + _botUsername + '?start=' + param;
+  const text = "I flapped " + (G.score | 0) + " in Flappy Bert \u{1F415} — bet you can't beat it!";
+  const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent(text);
+  try {
+    if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openTelegramLink) {
+      window.Telegram.WebApp.openTelegramLink(shareUrl);
+    } else {
+      window.open(shareUrl, '_blank');
+    }
+  } catch (e) { shareScoreCard(); }
 }
 
 function showScoreCardInline(dataUrl) {
