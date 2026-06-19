@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const { loadTournamentsFromFile } = require('../tournaments-config');
+const { loadTournamentsFromFile, validateTournament } = require('../tournaments-config');
 
 function withTempFile(contents, fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flappy-test-'));
@@ -182,4 +182,24 @@ test('Summer Session is recently_ended a few days after Sept 1', () => {
   const f = getFeaturedTournament(all, new Date('2026-09-05T12:00:00Z'));
   assert.equal(f.id, 'summer-session-2026');
   assert.equal(f.featured_state, 'recently_ended');
+});
+
+test('accepts optional scoreResetAt + prizes when valid', () => {
+  const ok = validateTournament({
+    id: 't', name: 'T', sponsor: 'S',
+    startTime: '2026-06-01T00:00:00Z', endTime: '2026-09-01T00:00:00Z',
+    scoreResetAt: '2026-06-22T00:00:00Z', prizes: [100, 60, 40, 30, 20],
+  });
+  assert.equal(ok, true);
+});
+
+test('rejects invalid optional fields', () => {
+  const base = { id: 't', name: 'T', sponsor: 'S', startTime: '2026-06-01T00:00:00Z', endTime: '2026-09-01T00:00:00Z' };
+  assert.equal(validateTournament({ ...base, scoreResetAt: 'not-a-date' }), false);
+  assert.equal(validateTournament({ ...base, prizes: 'nope' }), false);
+  assert.equal(validateTournament({ ...base, prizes: [10, -5] }), false);
+});
+
+test('still valid with neither optional field (backward compatible)', () => {
+  assert.equal(validateTournament({ id: 't', name: 'T', sponsor: 'S', startTime: '2026-06-01T00:00:00Z', endTime: '2026-09-01T00:00:00Z' }), true);
 });

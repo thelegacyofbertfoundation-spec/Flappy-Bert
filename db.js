@@ -243,34 +243,35 @@ function submitTournamentScore(tournamentId, telegramId, score, level, coinsEarn
   `).run(tournamentId, telegramId, score, level, coinsEarned);
 }
 
-function getTournamentLeaderboard(tournamentId, limit = 50) {
+function getTournamentLeaderboard(tournamentId, limit = 50, since = null) {
+  const where = since ? 'WHERE ts.tournament_id = ? AND ts.played_at >= ?' : 'WHERE ts.tournament_id = ?';
+  const params = since ? [tournamentId, since, limit] : [tournamentId, limit];
   return db.prepare(`
     SELECT
-      p.telegram_id,
-      p.first_name,
-      p.username,
-      p.skin,
+      p.telegram_id, p.first_name, p.username, p.skin,
       MAX(ts.score) AS best_score,
       COUNT(ts.id)  AS games_played,
       MAX(ts.level) AS max_level
     FROM tournament_scores ts
     JOIN players p ON p.telegram_id = ts.telegram_id
-    WHERE ts.tournament_id = ?
+    ${where}
     GROUP BY ts.telegram_id
     ORDER BY best_score DESC
     LIMIT ?
-  `).all(tournamentId, limit);
+  `).all(...params);
 }
 
-function getTournamentPlayerRank(tournamentId, telegramId) {
+function getTournamentPlayerRank(tournamentId, telegramId, since = null) {
+  const where = since ? 'WHERE tournament_id = ? AND played_at >= ?' : 'WHERE tournament_id = ?';
+  const params = since ? [tournamentId, since, telegramId] : [tournamentId, telegramId];
   const row = db.prepare(`
     SELECT rank FROM (
       SELECT telegram_id, RANK() OVER (ORDER BY MAX(score) DESC) as rank
       FROM tournament_scores
-      WHERE tournament_id = ?
+      ${where}
       GROUP BY telegram_id
     ) WHERE telegram_id = ?
-  `).get(tournamentId, telegramId);
+  `).get(...params);
   return row ? row.rank : null;
 }
 

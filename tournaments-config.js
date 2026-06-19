@@ -13,6 +13,13 @@ function validateTournament(obj) {
   if (Number.isNaN(Date.parse(obj.startTime))) return false;
   if (Number.isNaN(Date.parse(obj.endTime))) return false;
   if (Date.parse(obj.endTime) <= Date.parse(obj.startTime)) return false;
+  // Optional fields (tournament score-reset boundary + prize ladder). When present they must be well-formed.
+  if (obj.scoreResetAt !== undefined) {
+    if (typeof obj.scoreResetAt !== 'string' || Number.isNaN(Date.parse(obj.scoreResetAt))) return false;
+  }
+  if (obj.prizes !== undefined) {
+    if (!Array.isArray(obj.prizes) || obj.prizes.some((p) => typeof p !== 'number' || !Number.isFinite(p) || p < 0)) return false;
+  }
   return true;
 }
 
