@@ -25,6 +25,8 @@
     "name": "The Summer Session",
     "sponsor": "Dr. Inker LABS",
     "startTime": "2026-06-01T00:00:00Z",
-    "endTime": "2026-09-01T00:00:00Z"
+    "endTime": "2026-09-01T00:00:00Z",
+    "scoreResetAt": "2026-06-22T00:00:00Z",
+    "prizes": [100, 60, 40, 30, 20]
   }
 ]
