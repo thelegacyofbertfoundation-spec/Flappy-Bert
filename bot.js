@@ -150,9 +150,17 @@ const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
 app.use(cors());
 app.set('trust proxy', 1);
-// Body-size: tiny globally; only /api/share needs room for a base64 PNG upload.
+// Minimal security headers. Deliberately NO X-Frame-Options / restrictive
+// frame-ancestors — the game runs inside Telegram's in-app webview (framed).
+app.use((req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Referrer-Policy', 'no-referrer');
+  next();
+});
+// Body-size: tiny globally; only /api/share needs room for a base64 PNG upload
+// (a score-card PNG is well under 2mb — bounds the share relay).
 const smallJson = express.json({ limit: '64kb' });
-const largeJson = express.json({ limit: '6mb' });
+const largeJson = express.json({ limit: '2mb' });
 app.use((req, res, next) => (req.path === '/api/share' ? largeJson : smallJson)(req, res, next));
 
 // Simple rate limiter — per IP, 30 requests per minute
@@ -660,7 +668,7 @@ app.post('/api/score', rateLimit(10, 60000), (req, res) => {
     }
 
     // Mark session as used (single-use)
-    if (session) session.used = true;
+    if (session) { session.used = true; gameSessions.delete(session_id); }
 
     // Identity comes from the verified initData; db.upsertPlayer sanitizes the name.
     db.upsertPlayer(telegram_id, verified.first_name || anonName(telegram_id), verified.username || null);
@@ -682,7 +690,7 @@ app.post('/api/score', rateLimit(10, 60000), (req, res) => {
 });
 
 // GET /api/leaderboard?limit=20
-app.get('/api/leaderboard', (req, res) => {
+app.get('/api/leaderboard', rateLimit(30, 60000), (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 20, 100);
   const entries = db.getWeeklyLeaderboard(limit);
   res.json({
@@ -701,7 +709,12 @@ const RENDER_CACHE_MAX = 200;
 function cachedRender(key, produce) {
   const now = Date.now();
   const hit = renderCache.get(key);
-  if (hit && hit.exp > now) return hit.buf;
+  if (hit && hit.exp > now) {
+    // LRU: re-insert so a hot entry isn't FIFO-evicted under key rotation.
+    renderCache.delete(key);
+    renderCache.set(key, hit);
+    return hit.buf;
+  }
   const buf = produce();
   renderCache.set(key, { buf, exp: now + RENDER_CACHE_TTL_MS });
   while (renderCache.size > RENDER_CACHE_MAX) {
@@ -715,9 +728,14 @@ function cachedRender(key, produce) {
 // GET /api/leaderboard/image?highlight=TELEGRAM_ID
 app.get('/api/leaderboard/image', rateLimit(20, 60000), (req, res) => {
   try {
-    const highlightId = parseInt(req.query.highlight) || null;
+    const board = db.getWeeklyLeaderboard(50);
+    const reqHl = parseInt(req.query.highlight) || null;
+    // Only honor highlight if the id is actually on the board — collapses
+    // attacker-rotated fake ids to one cache key, neutralizing render-flood via
+    // ?highlight rotation (the expensive toBuffer render stays cached).
+    const highlightId = (reqHl && board.some((e) => e.telegram_id === reqHl)) ? reqHl : null;
     const key = `lb:${db.getWeekStart()}:${highlightId || 0}`;
-    const pngBuffer = cachedRender(key, () => renderLeaderboardCard(db.getWeeklyLeaderboard(50), {
+    const pngBuffer = cachedRender(key, () => renderLeaderboardCard(board, {
       highlightId,
       resetIn:   getResetCountdown(),
       weekLabel:  getWeekLabel(),
@@ -732,7 +750,7 @@ app.get('/api/leaderboard/image', rateLimit(20, 60000), (req, res) => {
 });
 
 // GET /api/player/:id
-app.get('/api/player/:id', (req, res) => {
+app.get('/api/player/:id', rateLimit(30, 60000), (req, res) => {
   const id = parseInt(req.params.id);
   const player  = db.getPlayer(id);
   if (!player) return res.status(404).json({ error: 'Player not found' });
@@ -785,12 +803,23 @@ app.post('/api/share', rateLimit(5, 60000), async (req, res) => {
     }
     const chatId = verified.id;
 
+    // Don't relay through the bot on behalf of a banned player.
+    if (db.isBanned(chatId)) {
+      return res.status(403).json({ error: 'Player is banned' });
+    }
+
     if (!image_base64) {
       return res.status(400).json({ error: 'image_base64 required' });
     }
 
     const base64Data = image_base64.replace(/^data:image\/\w+;base64,/, '');
     const imageBuffer = Buffer.from(base64Data, 'base64');
+    // Validate it's actually a PNG (magic bytes) before relaying through the bot —
+    // don't let the bot forward arbitrary attacker-supplied bytes.
+    if (imageBuffer.length < 8 || imageBuffer[0] !== 0x89 || imageBuffer[1] !== 0x50 ||
+        imageBuffer[2] !== 0x4e || imageBuffer[3] !== 0x47) {
+      return res.status(400).json({ error: 'Invalid image' });
+    }
 
     // Caption is server-supplied, not caller-supplied. No HTML parse mode.
     const caption = `🐕 Flappy Bert Score: ${score || '?'}\n\n🎮 Can you beat me?\n🔗 Play now: ${WEBAPP_URL}`;
@@ -845,7 +874,7 @@ app.get('/api/tournaments/featured', (req, res) => {
 });
 
 // GET /api/tournament/:id — Tournament info + leaderboard
-app.get('/api/tournament/:id', (req, res) => {
+app.get('/api/tournament/:id', rateLimit(30, 60000), (req, res) => {
   const t = db.getTournament(req.params.id);
   if (!t) return res.status(404).json({ error: 'Tournament not found' });
   
@@ -901,7 +930,7 @@ app.post('/api/tournament/:id/score', rateLimit(10, 60000), (req, res) => {
     }
 
     // Mark session as used (single-use)
-    if (session) session.used = true;
+    if (session) { session.used = true; gameSessions.delete(session_id); }
 
     // Identity from verified initData; db.upsertPlayer sanitizes the name.
     db.upsertPlayer(telegram_id, verified.first_name || anonName(telegram_id), verified.username || null);
@@ -926,14 +955,14 @@ app.get('/api/archives/:week', (req, res) => {
 });
 
 // POST /api/archive-now — Manually trigger archive for current week
-app.post('/api/archive-now', authMiddleware, (req, res) => {
+app.post('/api/archive-now', rateLimit(10, 60000), authMiddleware, (req, res) => {
   const result = db.archiveWeek();
   if (!result) return res.json({ ok: false, message: 'No scores to archive' });
   res.json({ ok: true, ...result });
 });
 
 // POST /api/admin/remove-scores — Remove a player's scores (requires API_SECRET)
-app.post('/api/admin/remove-scores', authMiddleware, (req, res) => {
+app.post('/api/admin/remove-scores', rateLimit(10, 60000), authMiddleware, (req, res) => {
   const { telegram_id, week_only } = req.body;
   if (!telegram_id) return res.status(400).json({ error: 'telegram_id required' });
   
@@ -953,7 +982,7 @@ app.post('/api/admin/remove-scores', authMiddleware, (req, res) => {
 });
 
 // POST /api/admin/remove-tournament-scores — Remove from tournament
-app.post('/api/admin/remove-tournament-scores', authMiddleware, (req, res) => {
+app.post('/api/admin/remove-tournament-scores', rateLimit(10, 60000), authMiddleware, (req, res) => {
   const { telegram_id, tournament_id } = req.body;
   if (!telegram_id || !tournament_id) return res.status(400).json({ error: 'telegram_id and tournament_id required' });
   
@@ -973,6 +1002,17 @@ app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }
 app.get('/game', (req, res) => {
   res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.sendFile(path.join(__dirname, 'flappy_bert.html'));
+});
+
+// Terminal error handler — catches body-parser errors (malformed JSON, payload
+// too large) and any uncaught route error. Returns a generic message so stack
+// traces / filesystem paths / dependency versions never leak to clients.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = (err && (err.status || err.statusCode)) || 500;
+  console.error('Unhandled error:', err && err.message);
+  res.status(status >= 400 && status < 600 ? status : 500).json({ error: 'Request failed' });
 });
 
 // ── Start server ────────────────────────────────────────────────────

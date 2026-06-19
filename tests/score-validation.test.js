@@ -11,6 +11,13 @@ test('accepts a legitimate score with a fresh session', () => {
   assert.equal(v.coins, 5);
 });
 
+test('clamps a fabricated level to what the score could earn (anti fake MAX LEVEL)', () => {
+  // score 1 can only legitimately be ~level 1; a claimed level 1000 is clamped.
+  assert.equal(scoreVerdict(ok({ score: 1, level: 1000, elapsedMs: 60000 })).level, 1);
+  // a level legitimately consistent with the score is preserved.
+  assert.equal(scoreVerdict(ok({ score: 100, level: 11, elapsedMs: 60000 })).level, 11);
+});
+
 test('rejects non-integer / negative / NaN scores', () => {
   assert.equal(scoreVerdict(ok({ score: 'abc' })).reason, 'invalid_score');
   assert.equal(scoreVerdict(ok({ score: -1 })).reason, 'invalid_score');

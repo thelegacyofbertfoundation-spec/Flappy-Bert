@@ -16,3 +16,5 @@ services:
         value: 3000
       - key: API_SECRET
         sync: false
+      - key: NODE_ENV
+        value: production
