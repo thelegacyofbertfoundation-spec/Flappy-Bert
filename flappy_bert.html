@@ -531,6 +531,18 @@ html, body {
 .frenzy-pill-bar-fill {
   background: linear-gradient(90deg, #ffb800, #fff3b0);
 }
+.ghost-pill {
+  position: fixed; top: 50px; left: 50%; transform: translateX(-50%);
+  z-index: 100; display: none; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 14px;
+  background: rgba(20, 24, 41, 0.85); border: 1px solid var(--accent3);
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.4);
+  font-size: 8px; color: var(--text); white-space: nowrap; pointer-events: none;
+}
+.ghost-pill.passed {
+  border-color: var(--gold); color: var(--gold);
+  box-shadow: 0 0 16px rgba(255, 215, 0, 0.7); animation: pulse 0.5s ease-in-out 2;
+}
 .fx-go-step {
   visibility: hidden;
   opacity: 0;
@@ -590,6 +602,8 @@ html, body {
   <span class="magnet-pill-text"><b>2X</b> <span id="frenzyPillText">8s</span></span>
   <div class="magnet-pill-bar"><div class="magnet-pill-bar-fill frenzy-pill-bar-fill" id="frenzyPillBarFill"></div></div>
 </div>
+
+<div id="ghostPill" class="ghost-pill">&#x1F3AF; <span id="ghostPillText">&#x2026;</span></div>
 
 <div id="muteBtn" onclick="toggleMute()" style="position:fixed;top:12px;left:12px;z-index:100;width:36px;height:36px;border-radius:50%;background:rgba(20,24,41,0.8);border:1px solid rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;user-select:none">&#x1F50A;</div>
 
@@ -990,6 +1004,9 @@ function init() {
   // Init audio
   AudioSystem.init();
   AdSystem.init();
+
+  // Beat-My-Ghost: read challenge param (cosmetic display-only target pill)
+  readGhostChallenge();
 
   requestAnimationFrame(gameLoop);
 }
@@ -4643,6 +4660,42 @@ function getTelegramUser() {
     }
   } catch(e) {}
   return null;
+}
+
+// Mirror of lib/ghost-challenge.parseGhost (browser can't require; drift accepted).
+function parseGhost(param) {
+  if (typeof param !== 'string') return null;
+  const m = /^g_(\d{1,17})_(\d{1,4})$/.exec(param);
+  if (!m) return null;
+  const id = Number(m[1]), score = Number(m[2]);
+  if (!Number.isSafeInteger(id) || id <= 0) return null;
+  if (!Number.isInteger(score) || score < 0 || score > 500) return null;
+  return { id, score };
+}
+
+function updateGhostPill() {
+  const pill = document.getElementById('ghostPill');
+  if (!pill) return;
+  if (!G.ghost || G.state !== 'playing') { pill.style.display = 'none'; return; }
+  const name = G.ghost.name || '…';
+  document.getElementById('ghostPillText').textContent = name + '  ' + G.ghost.score;
+  pill.style.display = 'flex';
+  pill.classList.toggle('passed', !!G.ghost.passed);
+}
+
+function readGhostChallenge() {
+  let raw = null;
+  try { raw = new URLSearchParams(window.location.search).get('ghost'); } catch (e) {}
+  if (!raw) { try { raw = window.Telegram?.WebApp?.initDataUnsafe?.start_param || null; } catch (e) {} }
+  const c = raw ? parseGhost(raw) : null;
+  if (!c) return;
+  const me = getTelegramUser();
+  if (me && me.id === c.id) return; // your own challenge — ignore
+  G.ghost = { id: c.id, score: c.score, name: null, passed: false };
+  fetch((API_BASE || '') + '/api/player/' + c.id)
+    .then((r) => r.json())
+    .then((d) => { if (G.ghost) G.ghost.name = (d && d.player && (d.player.first_name || d.player.username)) || 'a friend'; updateGhostPill(); })
+    .catch(() => { if (G.ghost) G.ghost.name = 'a friend'; updateGhostPill(); });
 }
 
 function getTelegramInitData() {
