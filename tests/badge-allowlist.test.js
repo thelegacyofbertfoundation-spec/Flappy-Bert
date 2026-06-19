@@ -23,9 +23,11 @@ test('unions with existing badges so a low score never wipes earned ones', () =>
   assert.deepEqual(out, ['immortal', 'legend']);
 });
 
-test('non-score badges pass the allowlist (not server-verifiable, cosmetic-only)', () => {
-  const out = allowedBadges(['combo_king', 'shield_breaker'], 5, []).sort();
-  assert.deepEqual(out, ['combo_king', 'shield_breaker']);
+test('ungated achievement badges require the default min score (no score-0 self-award)', () => {
+  // below the default min -> rejected (closes the score-0/score-5 self-award exploit)
+  assert.deepEqual(allowedBadges(['combo_king', 'shield_breaker'], 5, []), []);
+  // at/above the default min -> granted (still cosmetic, not server-verifiable)
+  assert.deepEqual(allowedBadges(['combo_king', 'shield_breaker'], 25, []).sort(), ['combo_king', 'shield_breaker']);
 });
 
 test('handles non-array inputs without throwing', () => {
