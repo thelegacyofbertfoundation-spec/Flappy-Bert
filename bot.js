@@ -31,6 +31,7 @@ const db          = require('./db');
 const { loadTournamentsFromFile, getFeaturedTournament } = require('./tournaments-config');
 const { scoreVerdict } = require('./lib/score-validation');
 const { allowedBadges } = require('./lib/badge-allowlist');
+const { parseGhost, buildStartParam, formatChallengeMessage } = require('./lib/ghost-challenge');
 const { renderLeaderboardCard, renderPlayerCard, renderTournamentCard } = require('./leaderboard-card');
 
 // ── Config ──────────────────────────────────────────────────────────
@@ -150,6 +151,8 @@ if (!BOT_TOKEN) {
 // ── Initialise ──────────────────────────────────────────────────────
 db.init();
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+let botUsername = null;
+bot.getMe().then((me) => { botUsername = me.username || null; }).catch(() => {});
 const app = express();
 app.use(cors());
 app.set('trust proxy', 1);
@@ -225,11 +228,26 @@ function getWeekLabel() {
 }
 
 // ── /start ──────────────────────────────────────────────────────────
-bot.onText(/\/start/, (msg) => {
+bot.onText(/\/start(?:\s+(\S+))?/, (msg, match) => {
   const chatId = msg.chat.id;
   const user   = msg.from;
 
   db.upsertPlayer(user.id, user.first_name, user.username);
+
+  // Beat-My-Ghost: a "/start g_<id>_<score>" deep-link → personalized challenge.
+  const challenge = match && match[1] ? parseGhost(match[1]) : null;
+  if (challenge) {
+    const sharer = db.getPlayer(challenge.id);
+    const name = (sharer && (sharer.first_name || sharer.username)) || null;
+    const ghostUrl = WEBAPP_URL + (WEBAPP_URL.includes('?') ? '&' : '?') +
+      'ghost=' + encodeURIComponent(buildStartParam(challenge.id, challenge.score));
+    bot.sendMessage(chatId, formatChallengeMessage(name, challenge.score), {
+      reply_markup: { inline_keyboard: [[
+        { text: '▶ Beat it!', web_app: { url: ghostUrl } },
+      ]] },
+    });
+    return;
+  }
 
   bot.sendMessage(chatId, [
     '🐕 *Welcome to Flappy Bert!*',
@@ -1003,6 +1021,9 @@ app.post('/api/admin/remove-tournament-scores', rateLimit(10, 60000), authMiddle
 
 // Health check
 app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
+
+// Read-only: lets the client build t.me/<bot>?start=… challenge links.
+app.get('/api/config', (req, res) => res.json({ botUsername }));
 
 // Serve the game HTML from the same directory
 app.get('/game', (req, res) => {

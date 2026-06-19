@@ -531,6 +531,18 @@ html, body {
 .frenzy-pill-bar-fill {
   background: linear-gradient(90deg, #ffb800, #fff3b0);
 }
+.ghost-pill {
+  position: fixed; top: 50px; left: 50%; transform: translateX(-50%);
+  z-index: 100; display: none; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 14px;
+  background: rgba(20, 24, 41, 0.85); border: 1px solid var(--accent3);
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.4);
+  font-size: 8px; color: var(--text); white-space: nowrap; pointer-events: none;
+}
+.ghost-pill.passed {
+  border-color: var(--gold); color: var(--gold);
+  box-shadow: 0 0 16px rgba(255, 215, 0, 0.7); animation: pulse 0.5s ease-in-out 2;
+}
 .fx-go-step {
   visibility: hidden;
   opacity: 0;
@@ -590,6 +602,8 @@ html, body {
   <span class="magnet-pill-text"><b>2X</b> <span id="frenzyPillText">8s</span></span>
   <div class="magnet-pill-bar"><div class="magnet-pill-bar-fill frenzy-pill-bar-fill" id="frenzyPillBarFill"></div></div>
 </div>
+
+<div id="ghostPill" class="ghost-pill">&#x1F3AF; <span id="ghostPillText">&#x2026;</span></div>
 
 <div id="muteBtn" onclick="toggleMute()" style="position:fixed;top:12px;left:12px;z-index:100;width:36px;height:36px;border-radius:50%;background:rgba(20,24,41,0.8);border:1px solid rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;user-select:none">&#x1F50A;</div>
 
@@ -722,6 +736,7 @@ html, body {
       <div class="go-level" id="goLevel">LEVEL 1</div>
       <div id="goCombo" style="font-size:7px;color:#ffb800;margin:4px 0;display:none"></div>
       <div id="goMultiplier" style="font-size:7px;color:var(--accent3);margin:4px 0;display:none"></div>
+      <div id="goChallenge" style="font-size:8px;margin:5px 0;display:none"></div>
     </div>
     <div class="go-rewards-bottom fx-go-step" data-step="rewards">
       <div class="go-coins" id="goCoins">+0 &#x1FA99;</div>
@@ -730,6 +745,9 @@ html, body {
     <div class="go-actions fx-go-step" data-step="actions">
       <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:8px">
         <button class="btn btn-primary" style="min-width:120px" onclick="startGame()">&#x1F504; PLAY AGAIN</button>
+      </div>
+      <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:6px">
+        <button class="btn btn-gold" style="font-size:8px;padding:7px 12px" onclick="challengeFriend()">&#x1F3AF; CHALLENGE A FRIEND</button>
       </div>
       <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:6px">
         <button class="btn btn-secondary" style="font-size:7px;padding:6px 10px" onclick="showMenu()">&#x1F3E0; MENU</button>
@@ -953,6 +971,7 @@ function init() {
   document.getElementById('menuBertImg').src = MENU_B64;
   
   loadData();
+  loadConfig();
   updateCoinDisplay();
   resizeCanvas();
   generateStars();
@@ -990,6 +1009,9 @@ function init() {
   // Init audio
   AudioSystem.init();
   AdSystem.init();
+
+  // Beat-My-Ghost: read challenge param (cosmetic display-only target pill)
+  readGhostChallenge();
 
   requestAnimationFrame(gameLoop);
 }
@@ -1879,7 +1901,10 @@ function startGame() {
   G.powerups.frenzy.active = false;
   G.powerups.frenzy.expiresAt = 0;
   G._frenzyPrevMult = 1;
-  
+  // Ghost challenge: reset the per-run pass-moment and show the target pill
+  if (G.ghost) G.ghost.passed = false;
+  updateGhostPill();
+
   // Apply equipped multiplier and consume 1 use
   if (G.equippedMultiplier && G.ownedMultipliers[G.equippedMultiplier] > 0) {
     const m = MULTIPLIERS.find(x => x.id === G.equippedMultiplier);
@@ -2256,6 +2281,21 @@ function showGameOverScreen() {
   } else {
     goMultiplier.style.display = 'none';
   }
+
+  // Ghost challenge result line
+  const goChallenge = document.getElementById('goChallenge');
+  if (G.ghost && goChallenge) {
+    const beat = G.score > G.ghost.score;
+    const who = G.ghost.name || 'them';
+    goChallenge.style.display = 'block';
+    goChallenge.style.color = beat ? 'var(--gold)' : 'var(--accent3)';
+    goChallenge.textContent = beat
+      ? `\u{1F3C6} YOU BEAT ${who}!  ${G.score} \u{203A} ${G.ghost.score}`
+      : `\u{1F3AF} So close — ${G.score}/${G.ghost.score}. Try again!`;
+  } else if (goChallenge) {
+    goChallenge.style.display = 'none';
+  }
+  updateGhostPill();
 
   // Rank nudge (uses cached leaderboard data)
   goRankNudge.style.display = 'none';
@@ -2707,6 +2747,12 @@ function update() {
       const scoreGain = Math.floor(G._scoreAccum);
       G._scoreAccum -= scoreGain;
       G.score += scoreGain;
+      if (G.ghost && !G.ghost.passed && G.score > G.ghost.score) {
+        G.ghost.passed = true;
+        FX._floater('PASSED ' + (G.ghost.name || 'them') + '!', window.innerWidth / 2, window.innerHeight * 0.4, 'fx-near-miss-floater');
+        AudioSystem.fxLevelUp();
+        updateGhostPill();
+      }
       G.coinsEarned += scoreGain;
       G.combo++;
       if (G.combo > G.bestCombo) G.bestCombo = G.combo;
@@ -4560,6 +4606,27 @@ async function shareScoreCard() {
   }
 }
 
+let _botUsername = null;
+async function loadConfig() {
+  try { const r = await fetch((API_BASE || '') + '/api/config'); const d = await r.json(); _botUsername = d.botUsername || null; } catch (e) {}
+}
+
+async function challengeFriend() {
+  const user = getTelegramUser();
+  if (!user || !_botUsername) return shareScoreCard(); // graceful fallback
+  const param = 'g_' + user.id + '_' + (G.score | 0);
+  const link = 'https://t.me/' + _botUsername + '?start=' + param;
+  const text = "I flapped " + (G.score | 0) + " in Flappy Bert \u{1F415} — bet you can't beat it!";
+  const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent(text);
+  try {
+    if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openTelegramLink) {
+      window.Telegram.WebApp.openTelegramLink(shareUrl);
+    } else {
+      window.open(shareUrl, '_blank');
+    }
+  } catch (e) { shareScoreCard(); }
+}
+
 function showScoreCardInline(dataUrl) {
   // Show the image in a modal overlay so user can long-press to save
   const div = document.createElement('div');
@@ -4643,6 +4710,42 @@ function getTelegramUser() {
     }
   } catch(e) {}
   return null;
+}
+
+// Mirror of lib/ghost-challenge.parseGhost (browser can't require; drift accepted).
+function parseGhost(param) {
+  if (typeof param !== 'string') return null;
+  const m = /^g_(\d{1,17})_(\d{1,4})$/.exec(param);
+  if (!m) return null;
+  const id = Number(m[1]), score = Number(m[2]);
+  if (!Number.isSafeInteger(id) || id <= 0) return null;
+  if (!Number.isInteger(score) || score < 0 || score > 500) return null;
+  return { id, score };
+}
+
+function updateGhostPill() {
+  const pill = document.getElementById('ghostPill');
+  if (!pill) return;
+  if (!G.ghost || (G.state !== 'playing' && G.state !== 'ready')) { pill.style.display = 'none'; return; }
+  const name = G.ghost.name || '…';
+  document.getElementById('ghostPillText').textContent = name + '  ' + G.ghost.score;
+  pill.style.display = 'flex';
+  pill.classList.toggle('passed', !!G.ghost.passed);
+}
+
+function readGhostChallenge() {
+  let raw = null;
+  try { raw = new URLSearchParams(window.location.search).get('ghost'); } catch (e) {}
+  if (!raw) { try { raw = window.Telegram?.WebApp?.initDataUnsafe?.start_param || null; } catch (e) {} }
+  const c = raw ? parseGhost(raw) : null;
+  if (!c) return;
+  const me = getTelegramUser();
+  if (me && me.id === c.id) return; // your own challenge — ignore
+  G.ghost = { id: c.id, score: c.score, name: null, passed: false };
+  fetch((API_BASE || '') + '/api/player/' + c.id)
+    .then((r) => r.json())
+    .then((d) => { if (G.ghost) G.ghost.name = (d && d.player && (d.player.first_name || d.player.username)) || 'a friend'; updateGhostPill(); })
+    .catch(() => { if (G.ghost) G.ghost.name = 'a friend'; updateGhostPill(); });
 }
 
 function getTelegramInitData() {
