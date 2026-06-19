@@ -108,14 +108,17 @@ function requireVerifiedUser(req, res) {
 // requireVerifiedUser; this checks only score/level/coins against
 // server-trusted state (all HARD rejects; body-supplied rate inflators are
 // ignored). Decision logic lives in ./lib/score-validation (scoreVerdict).
-function validateScore(session, body) {
+function validateScore(session, body, board) {
   const elapsedMs = session ? (Date.now() - session.startedAt) : 0;
+  // Single-use is tracked PER BOARD so one game can record to BOTH the weekly and
+  // the tournament leaderboard, while still blocking a replay to either board.
+  const usedFlag = board === 'tournament' ? 'usedTournament' : 'usedWeekly';
   return scoreVerdict({
     score: body.score,
     level: body.level,
     coins: body.coins_earned,
     hasSession: !!session,
-    sessionUsed: !!(session && session.used),
+    sessionUsed: !!(session && session[usedFlag]),
     elapsedMs,
   });
 }
@@ -629,7 +632,8 @@ app.post('/api/session', rateLimit(10, 60000), (req, res) => {
     id: sessionId,
     telegramId: verified.id,
     startedAt: Date.now(),
-    used: false,
+    usedWeekly: false,
+    usedTournament: false,
   });
 
   res.json({ session_id: sessionId, server_time: Date.now() });
@@ -661,14 +665,16 @@ app.post('/api/score', rateLimit(10, 60000), (req, res) => {
       return res.status(403).json({ error: 'Invalid session' });
     }
 
-    const validation = validateScore(session, { score, level, coins_earned });
+    const validation = validateScore(session, { score, level, coins_earned }, 'weekly');
     if (!validation.valid) {
       console.log(`🚫 Score REJECTED [${telegram_id}]: score=${score} reason=${validation.reason}`);
       return res.status(403).json({ error: 'Score rejected', reason: validation.reason });
     }
 
-    // Mark session as used (single-use)
-    if (session) { session.used = true; gameSessions.delete(session_id); }
+    // Consume this session's WEEKLY slot. Per-board single-use, so the same game
+    // can still record to the tournament board (separate slot) — but a weekly
+    // replay on this session is rejected.
+    if (session) session.usedWeekly = true;
 
     // Identity comes from the verified initData; db.upsertPlayer sanitizes the name.
     db.upsertPlayer(telegram_id, verified.first_name || anonName(telegram_id), verified.username || null);
@@ -923,14 +929,14 @@ app.post('/api/tournament/:id/score', rateLimit(10, 60000), (req, res) => {
     }
 
     // Full anti-cheat validation (numeric guard, hard cap, bounds, time-based, session reuse)
-    const validation = validateScore(session, { score, level, coins_earned });
+    const validation = validateScore(session, { score, level, coins_earned }, 'tournament');
     if (!validation.valid) {
       console.log(`🚫 Tournament score REJECTED [${telegram_id}]: score=${score} reason=${validation.reason}`);
       return res.status(403).json({ error: 'Score rejected', reason: validation.reason });
     }
 
-    // Mark session as used (single-use)
-    if (session) { session.used = true; gameSessions.delete(session_id); }
+    // Consume this session's TOURNAMENT slot (separate from the weekly slot).
+    if (session) session.usedTournament = true;
 
     // Identity from verified initData; db.upsertPlayer sanitizes the name.
     db.upsertPlayer(telegram_id, verified.first_name || anonName(telegram_id), verified.username || null);
