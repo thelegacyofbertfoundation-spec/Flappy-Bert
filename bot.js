@@ -33,6 +33,7 @@ const { scoreVerdict } = require('./lib/score-validation');
 const { allowedBadges } = require('./lib/badge-allowlist');
 const { parseGhost, buildStartParam, formatChallengeMessage } = require('./lib/ghost-challenge');
 const { renderLeaderboardCard, renderPlayerCard, renderTournamentCard } = require('./leaderboard-card');
+const { effectiveResetSince } = require('./lib/tournament-reset');
 
 // ── Config ──────────────────────────────────────────────────────────
 const BOT_TOKEN  = process.env.BOT_TOKEN;
@@ -203,6 +204,11 @@ for (const t of seededTournaments) {
   db.createTournament(t.id, t.name, t.sponsor, t.startTime, t.endTime);
 }
 console.log(`Loaded ${seededTournaments.length} tournament(s) from config`);
+
+// Config-by-id (incl. optional scoreResetAt/prizes) for the reset boundary + prize ladder.
+const tournamentConfigById = new Map(seededTournaments.map((t) => [t.id, t]));
+const tournamentSince = (id) => effectiveResetSince(tournamentConfigById.get(id)?.scoreResetAt, Date.now());
+const tournamentPrizes = (id) => tournamentConfigById.get(id)?.prizes || null;
 
 // One-time data cleanup: a prior deploy seeded a DUPLICATE April tournament
 // (`april-flapoff-2026`) alongside the canonical `april-fools-flapoff-2026` (the
@@ -549,15 +555,17 @@ bot.onText(/^\/tournament(?:\s+(.+))?$/, async (msg, match) => {
   }
 
   try {
-    const entries = db.getTournamentLeaderboard(chosen.id, 50);
+    const since = tournamentSince(chosen.id);
+    const entries = db.getTournamentLeaderboard(chosen.id, 50, since);
     const pngBuffer = renderTournamentCard(entries, {
       name: chosen.name,
       sponsor: chosen.sponsor,
       status: statusText,
       highlightId: msg.from.id,
+      prizes: tournamentPrizes(chosen.id),
     });
 
-    const rank = db.getTournamentPlayerRank(chosen.id, msg.from.id);
+    const rank = db.getTournamentPlayerRank(chosen.id, msg.from.id, since);
     const rankText = rank ? `\n🏅 Your rank: #${rank}` : '';
 
     await bot.sendPhoto(chatId, pngBuffer, {
@@ -920,8 +928,13 @@ app.get('/api/tournament/:id', rateLimit(30, 60000), (req, res) => {
   if (now < start) status = 'scheduled';
   else if (now <= end) status = 'live';
   
-  const entries = db.getTournamentLeaderboard(t.id, 50);
-  res.json({ tournament: { ...t, status }, entries });
+  const since = tournamentSince(t.id);
+  const entries = db.getTournamentLeaderboard(t.id, 50, since);
+  res.json({
+    tournament: { ...t, status, scoreResetAt: tournamentConfigById.get(t.id)?.scoreResetAt || null },
+    entries,
+    prizes: tournamentPrizes(t.id),
+  });
 });
 
 // POST /api/tournament/:id/score — Submit score to tournament
@@ -971,7 +984,7 @@ app.post('/api/tournament/:id/score', rateLimit(10, 60000), (req, res) => {
     db.upsertPlayer(telegram_id, verified.first_name || anonName(telegram_id), verified.username || null);
     db.submitTournamentScore(req.params.id, telegram_id, Number(score), validation.level, validation.coins);
 
-    const rank = db.getTournamentPlayerRank(req.params.id, telegram_id);
+    const rank = db.getTournamentPlayerRank(req.params.id, telegram_id, tournamentSince(req.params.id));
     res.json({ ok: true, rank, flagged: false });
   } catch (err) {
     console.error('API tournament score error:', err);
