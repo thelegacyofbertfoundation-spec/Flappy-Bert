@@ -4361,7 +4361,8 @@ async function fetchAndRenderEntries(tournamentId, listEl) {
     const res = await fetch((API_BASE || '') + '/api/tournament/' + encodeURIComponent(tournamentId));
     if (!res.ok) throw new Error('http ' + res.status);
     const data = await res.json();
-    renderEntriesInto(listEl, data.entries || []);
+    renderEntriesInto(listEl, data.entries || [], data.prizes || null);
+    if (data.tournament) maybeShowResetNote(listEl, data.tournament);
   } catch(e) {
     listEl.replaceChildren();
     listEl.appendChild(_makeEl('div', {
@@ -4371,37 +4372,50 @@ async function fetchAndRenderEntries(tournamentId, listEl) {
   }
 }
 
-function renderEntriesInto(listEl, entries) {
+function renderEntriesInto(listEl, entries, prizes) {
   const user = getTelegramUser();
   listEl.replaceChildren();
-  if (entries.length === 0) {
-    listEl.appendChild(_makeEl('div', {
-      style: 'text-align:center;color:var(--text-dim);font-size:7px;padding:12px',
-      text: 'No scores yet',
-    }));
+  const nPrize = Array.isArray(prizes) ? prizes.length : 0;
+  if (entries.length === 0 && nPrize === 0) {
+    listEl.appendChild(_makeEl('div', { style: 'text-align:center;color:var(--text-dim);font-size:7px;padding:12px', text: 'No scores yet' }));
     return;
   }
-  entries.forEach((e, i) => {
+  const rows = Math.max(nPrize, entries.length);
+  for (let i = 0; i < rows; i++) {
     const rank = i + 1;
-    const isYou = user && e.telegram_id === user.id;
+    const e = entries[i];
+    const prize = (i < nPrize) ? prizes[i] : null;
+    const isYou = e && user && e.telegram_id === user.id;
     const medal = rank === 1 ? '\u{1F947}' : (rank === 2 ? '\u{1F948}' : (rank === 3 ? '\u{1F949}' : '#' + rank));
     const bg = isYou ? 'rgba(255,215,0,0.15)' : (rank <= 3 ? 'rgba(255,215,0,0.06)' : 'rgba(255,255,255,0.03)');
     const border = isYou ? 'border:1px solid rgba(255,215,0,0.4);' : '';
-    const nameColor = isYou ? '#ffd700' : '#e8e8f0';
-    const displayName = (isYou ? '▶ ' : '') + (e.first_name || e.username || 'Player');
+    const nameColor = isYou ? '#ffd700' : (e ? '#e8e8f0' : '#7a7e9a');
+    const displayName = e ? ((isYou ? '▶ ' : '') + (e.first_name || e.username || 'Player')) : '— up for grabs —';
 
     const row = _makeEl('div', { style: 'display:flex;align-items:center;padding:6px 8px;margin:3px 0;border-radius:6px;background:' + bg + ';' + border });
-    const medalEl = _makeEl('div', { style: 'width:28px;text-align:center;font-size:' + (rank<=3?'12px':'8px') + ';flex-shrink:0', text: medal });
-    const nameEl = _makeEl('div', { style: 'flex:1;font-size:8px;color:' + nameColor + ';margin-left:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', text: displayName });
-    const scoreEl = _makeEl('div', { style: 'font-size:10px;font-weight:bold;color:#ffd700;margin-left:8px', text: String(e.best_score) });
-    const gamesEl = _makeEl('div', { style: 'font-size:7px;color:#7a7e9a;margin-left:8px;width:20px;text-align:right', text: String(e.games_played) + 'g' });
-
-    row.appendChild(medalEl);
-    row.appendChild(nameEl);
-    row.appendChild(scoreEl);
-    row.appendChild(gamesEl);
+    row.appendChild(_makeEl('div', { style: 'width:28px;text-align:center;font-size:' + (rank<=3?'12px':'8px') + ';flex-shrink:0', text: medal }));
+    if (prize != null) {
+      row.appendChild(_makeEl('div', { style: 'font-size:8px;font-weight:bold;color:#ffd700;width:34px;flex-shrink:0;text-align:center', text: '$' + prize }));
+    }
+    row.appendChild(_makeEl('div', { style: 'flex:1;font-size:8px;color:' + nameColor + ';margin-left:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', text: displayName }));
+    row.appendChild(_makeEl('div', { style: 'font-size:10px;font-weight:bold;color:#ffd700;margin-left:8px', text: e ? String(e.best_score) : '' }));
+    row.appendChild(_makeEl('div', { style: 'font-size:7px;color:#7a7e9a;margin-left:8px;width:20px;text-align:right', text: e ? (String(e.games_played) + 'g') : '' }));
     listEl.appendChild(row);
+  }
+}
+
+// One-line note while the prize reset is still upcoming, so the pre-reset scores
+// shown next to live prizes aren't confusing. Hidden once the boundary passes.
+function maybeShowResetNote(listEl, tournament) {
+  const resetAt = tournament && tournament.scoreResetAt;
+  if (!resetAt) return;
+  const ms = Date.parse(resetAt);
+  if (Number.isNaN(ms) || Date.now() >= ms) return;
+  const note = _makeEl('div', {
+    style: 'text-align:center;font-size:7px;color:#ffd700;background:rgba(255,215,0,0.08);border:1px solid rgba(255,215,0,0.25);border-radius:6px;padding:5px 8px;margin:4px 0',
+    text: '\u{1F3C1} Prize competition starts ' + new Date(ms).toUTCString().replace(' GMT', ' UTC') + ' — scores reset then',
   });
+  listEl.insertBefore(note, listEl.firstChild);
 }
 
 async function submitTournamentScore(score, level, coinsEarned) {
