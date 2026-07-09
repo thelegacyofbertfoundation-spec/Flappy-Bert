@@ -5,8 +5,10 @@ const fs = require('fs');
 const { csvCell } = require('./lib/csv-cell');
 const { sanitizeName } = require('./lib/sanitize-name');
 
-// Use persistent disk if available (Render), otherwise local directory
-const DATA_DIR = fs.existsSync('/data') ? '/data' : __dirname;
+// Use persistent disk if available (Render), otherwise local directory.
+// FLAPPY_DATA_DIR overrides both (used by tests to point at an isolated temp dir
+// so they can NEVER touch the real ./flappy_bert.db; unset in prod → prior behavior).
+const DATA_DIR = process.env.FLAPPY_DATA_DIR || (fs.existsSync('/data') ? '/data' : __dirname);
 const DB_PATH = path.join(DATA_DIR, 'flappy_bert.db');
 const ARCHIVE_DIR = path.join(DATA_DIR, 'archives');
 let db;
@@ -158,6 +160,8 @@ function submitScore(telegramId, score, level, coinsEarned) {
 
 function getWeeklyLeaderboard(limit = 20) {
   const week = getWeekStart();
+  // Tiebreak: among equal best_score, whoever REACHED that score earliest wins —
+  // best_at = MIN(played_at) over the player's rows equal to their best score (b.best).
   return db.prepare(`
     SELECT
       p.telegram_id,
@@ -167,14 +171,17 @@ function getWeeklyLeaderboard(limit = 20) {
       p.badges,
       MAX(s.score) AS best_score,
       COUNT(s.id)  AS games_played,
-      MAX(s.level) AS max_level
+      MAX(s.level) AS max_level,
+      MIN(CASE WHEN s.score = b.best THEN s.played_at END) AS best_at
     FROM scores s
     JOIN players p ON p.telegram_id = s.telegram_id
+    JOIN (SELECT telegram_id, MAX(score) AS best FROM scores WHERE week_start = ? GROUP BY telegram_id) b
+      ON b.telegram_id = s.telegram_id
     WHERE s.week_start = ?
     GROUP BY s.telegram_id
-    ORDER BY best_score DESC
+    ORDER BY best_score DESC, best_at ASC
     LIMIT ?
-  `).all(week, limit);
+  `).all(week, week, limit);
 }
 
 function getPlayerWeeklyBest(telegramId) {
@@ -188,14 +195,20 @@ function getPlayerWeeklyBest(telegramId) {
 
 function getPlayerRank(telegramId) {
   const week = getWeekStart();
+  // Same composite ordering as getWeeklyLeaderboard so the caption rank can never
+  // disagree with the card's row order (best_score DESC, earliest-time-at-best ASC).
   const row = db.prepare(`
     SELECT rank FROM (
-      SELECT telegram_id, RANK() OVER (ORDER BY MAX(score) DESC) as rank
-      FROM scores
-      WHERE week_start = ?
-      GROUP BY telegram_id
+      SELECT s.telegram_id AS telegram_id,
+        RANK() OVER (ORDER BY MAX(s.score) DESC,
+                     MIN(CASE WHEN s.score = b.best THEN s.played_at END) ASC) as rank
+      FROM scores s
+      JOIN (SELECT telegram_id, MAX(score) AS best FROM scores WHERE week_start = ? GROUP BY telegram_id) b
+        ON b.telegram_id = s.telegram_id
+      WHERE s.week_start = ?
+      GROUP BY s.telegram_id
     ) WHERE telegram_id = ?
-  `).get(week, telegramId);
+  `).get(week, week, telegramId);
   return row ? row.rank : null;
 }
 
@@ -244,32 +257,50 @@ function submitTournamentScore(tournamentId, telegramId, score, level, coinsEarn
 }
 
 function getTournamentLeaderboard(tournamentId, limit = 50, since = null) {
+  // The `since` boundary (from lib/tournament-reset) must apply IDENTICALLY to the
+  // tiebreak subquery and the outer filter, so a pre-boundary achievement can never
+  // win a post-boundary tie. best_at = earliest played_at at the (post-boundary) best.
+  const subWhere = since ? 'WHERE tournament_id = ? AND played_at >= ?' : 'WHERE tournament_id = ?';
   const where = since ? 'WHERE ts.tournament_id = ? AND ts.played_at >= ?' : 'WHERE ts.tournament_id = ?';
-  const params = since ? [tournamentId, since, limit] : [tournamentId, limit];
+  const params = since
+    ? [tournamentId, since, tournamentId, since, limit]
+    : [tournamentId, tournamentId, limit];
   return db.prepare(`
     SELECT
       p.telegram_id, p.first_name, p.username, p.skin,
       MAX(ts.score) AS best_score,
       COUNT(ts.id)  AS games_played,
-      MAX(ts.level) AS max_level
+      MAX(ts.level) AS max_level,
+      MIN(CASE WHEN ts.score = b.best THEN ts.played_at END) AS best_at
     FROM tournament_scores ts
     JOIN players p ON p.telegram_id = ts.telegram_id
+    JOIN (SELECT telegram_id, MAX(score) AS best FROM tournament_scores ${subWhere} GROUP BY telegram_id) b
+      ON b.telegram_id = ts.telegram_id
     ${where}
     GROUP BY ts.telegram_id
-    ORDER BY best_score DESC
+    ORDER BY best_score DESC, best_at ASC
     LIMIT ?
   `).all(...params);
 }
 
 function getTournamentPlayerRank(tournamentId, telegramId, since = null) {
-  const where = since ? 'WHERE tournament_id = ? AND played_at >= ?' : 'WHERE tournament_id = ?';
-  const params = since ? [tournamentId, since, telegramId] : [tournamentId, telegramId];
+  // Composite ordering identical to getTournamentLeaderboard (incl. the `since`
+  // boundary on the tiebreak) so the rank caption matches the card row order.
+  const subWhere = since ? 'WHERE tournament_id = ? AND played_at >= ?' : 'WHERE tournament_id = ?';
+  const where = since ? 'WHERE ts.tournament_id = ? AND ts.played_at >= ?' : 'WHERE ts.tournament_id = ?';
+  const params = since
+    ? [tournamentId, since, tournamentId, since, telegramId]
+    : [tournamentId, tournamentId, telegramId];
   const row = db.prepare(`
     SELECT rank FROM (
-      SELECT telegram_id, RANK() OVER (ORDER BY MAX(score) DESC) as rank
-      FROM tournament_scores
+      SELECT ts.telegram_id AS telegram_id,
+        RANK() OVER (ORDER BY MAX(ts.score) DESC,
+                     MIN(CASE WHEN ts.score = b.best THEN ts.played_at END) ASC) as rank
+      FROM tournament_scores ts
+      JOIN (SELECT telegram_id, MAX(score) AS best FROM tournament_scores ${subWhere} GROUP BY telegram_id) b
+        ON b.telegram_id = ts.telegram_id
       ${where}
-      GROUP BY telegram_id
+      GROUP BY ts.telegram_id
     ) WHERE telegram_id = ?
   `).get(...params);
   return row ? row.rank : null;
@@ -293,6 +324,13 @@ function removeTournamentScores(telegramId, tournamentId) {
 
 function resetTournamentScores(tournamentId) {
   db.prepare('DELETE FROM tournament_scores WHERE tournament_id = ?').run(tournamentId);
+}
+
+// Count of score rows for a tournament — used by the /resettournament guard to
+// show the admin exactly what a reset would destroy before they confirm.
+function countTournamentScores(tournamentId) {
+  const row = db.prepare('SELECT COUNT(*) AS n FROM tournament_scores WHERE tournament_id = ?').get(tournamentId);
+  return row ? row.n : 0;
 }
 
 // Remove a tournament row entirely (used for ops cleanup of duplicate/orphan
@@ -351,13 +389,16 @@ function archiveWeek(weekStart) {
       MAX(s.score) AS best_score,
       COUNT(s.id)  AS games_played,
       MAX(s.level) AS max_level,
-      SUM(s.coins_earned) AS total_coins
+      SUM(s.coins_earned) AS total_coins,
+      MIN(CASE WHEN s.score = b.best THEN s.played_at END) AS best_at
     FROM scores s
     JOIN players p ON p.telegram_id = s.telegram_id
+    JOIN (SELECT telegram_id, MAX(score) AS best FROM scores WHERE week_start = ? GROUP BY telegram_id) b
+      ON b.telegram_id = s.telegram_id
     WHERE s.week_start = ?
     GROUP BY s.telegram_id
-    ORDER BY best_score DESC
-  `).all(week);
+    ORDER BY best_score DESC, best_at ASC
+  `).all(week, week);
 
   if (entries.length === 0) return null;
 
@@ -416,6 +457,7 @@ module.exports = {
   removeAllPlayerScores,
   removeTournamentScores,
   resetTournamentScores,
+  countTournamentScores,
   deleteTournament,
   banPlayer,
   unbanPlayer,

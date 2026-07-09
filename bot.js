@@ -34,6 +34,22 @@ const { allowedBadges } = require('./lib/badge-allowlist');
 const { parseGhost, buildStartParam, formatChallengeMessage } = require('./lib/ghost-challenge');
 const { renderLeaderboardCard, renderPlayerCard, renderTournamentCard } = require('./leaderboard-card');
 const { effectiveResetSince } = require('./lib/tournament-reset');
+const { safeSend, throttleKey } = require('./lib/safe-send');
+const { parseResetCommand } = require('./lib/reset-tournament-guard');
+
+// ── Crash safety (FIX 2) ────────────────────────────────────────────
+// node kills the process on an unhandled rejection; a single failed Telegram send
+// (429 burst / 403 bot-blocked / 400) must NOT take down the score API mid-tournament.
+// Log and keep serving. (Individual sends are additionally wrapped in safeSend.)
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('⚠️  Unhandled promise rejection (kept alive):', reason, promise);
+});
+// A truly uncaught exception may have left state inconsistent — exit 1 so the host
+// (Render) restarts the container cleanly rather than serving from corrupted state.
+process.on('uncaughtException', (err) => {
+  console.error('💥  Uncaught exception — exiting for a clean restart:', err && err.stack ? err.stack : err);
+  process.exit(1);
+});
 
 // ── Config ──────────────────────────────────────────────────────────
 const BOT_TOKEN  = process.env.BOT_TOKEN;
@@ -154,6 +170,18 @@ db.init();
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 let botUsername = null;
 bot.getMe().then((me) => { botUsername = me.username || null; }).catch(() => {});
+
+// Polling errors (e.g. 409 conflict during a deploy overlap when two instances
+// poll at once) can arrive in a storm — throttle to at most one log per code per
+// window so they don't drown the logs. Without this a 409 loop spams every second.
+const _pollErrState = new Map();
+const POLL_ERR_WINDOW_MS = 30 * 1000;
+bot.on('polling_error', (err) => {
+  const code = (err && err.code) || 'UNKNOWN';
+  if (throttleKey(_pollErrState, code, Date.now(), POLL_ERR_WINDOW_MS)) {
+    console.error(`⚠️  polling_error [${code}]: ${err && err.message ? err.message : err}`);
+  }
+});
 const app = express();
 app.use(cors());
 app.set('trust proxy', 1);
@@ -258,15 +286,15 @@ bot.onText(/\/start(?:\s+(\S+))?/, (msg, match) => {
     const name = (sharer && (sharer.first_name || sharer.username)) || null;
     const ghostUrl = WEBAPP_URL + (WEBAPP_URL.includes('?') ? '&' : '?') +
       'ghost=' + encodeURIComponent(buildStartParam(challenge.id, challenge.score));
-    bot.sendMessage(chatId, formatChallengeMessage(name, challenge.score), {
+    safeSend(bot.sendMessage(chatId, formatChallengeMessage(name, challenge.score), {
       reply_markup: { inline_keyboard: [[
         { text: '▶ Beat it!', web_app: { url: ghostUrl } },
       ]] },
-    });
+    }), '/start ghost');
     return;
   }
 
-  bot.sendMessage(chatId, [
+  safeSend(bot.sendMessage(chatId, [
     '🐕 *Welcome to Flappy Bert!*',
     '',
     `Hey ${escapeMarkdown(user.first_name)}! Ready to flap?`,
@@ -286,18 +314,18 @@ bot.onText(/\/start(?:\s+(\S+))?/, (msg, match) => {
         { text: '🎮 Play Flappy Bert', web_app: { url: WEBAPP_URL } }
       ]]
     }
-  });
+  }), '/start welcome');
 });
 
 // ── /play ───────────────────────────────────────────────────────────
 bot.onText(/\/play/, (msg) => {
-  bot.sendMessage(msg.chat.id, '🎮 Tap below to play!', {
+  safeSend(bot.sendMessage(msg.chat.id, '🎮 Tap below to play!', {
     reply_markup: {
       inline_keyboard: [[
         { text: '🐕 Launch Flappy Bert', web_app: { url: WEBAPP_URL } }
       ]]
     }
-  });
+  }), '/play');
 });
 
 // ── /leaderboard — sends an image card ──────────────────────────────
@@ -327,7 +355,7 @@ bot.onText(/\/leaderboard/, async (msg) => {
     });
   } catch (err) {
     console.error('Leaderboard error:', err);
-    bot.sendMessage(chatId, '❌ Failed to generate leaderboard. Try again later.');
+    safeSend(bot.sendMessage(chatId, '❌ Failed to generate leaderboard. Try again later.'), '/leaderboard error');
   }
 });
 
@@ -368,13 +396,13 @@ bot.onText(/\/mystats/, async (msg) => {
     });
   } catch (err) {
     console.error('Stats error:', err);
-    bot.sendMessage(chatId, '❌ Failed to generate stats card. Try again later.');
+    safeSend(bot.sendMessage(chatId, '❌ Failed to generate stats card. Try again later.'), '/mystats error');
   }
 });
 
 // ── /help ───────────────────────────────────────────────────────────
 bot.onText(/\/help/, (msg) => {
-  bot.sendMessage(msg.chat.id, [
+  safeSend(bot.sendMessage(msg.chat.id, [
     '🐕 *Flappy Bert Commands*',
     '',
     '🎮 /play — Launch the game',
@@ -390,7 +418,7 @@ bot.onText(/\/help/, (msg) => {
     '• Difficulty increases every 10 pipes',
     '• Buy skins & multipliers in the shop',
     '• Leaderboard resets every Monday 00:00 UTC',
-  ].join('\n'), { parse_mode: 'Markdown' });
+  ].join('\n'), { parse_mode: 'Markdown' }), '/help');
 });
 
 // ── Admin: /ban <telegram_id> — Remove cheater from all leaderboards ─
@@ -401,27 +429,27 @@ bot.onText(/\/ban(?:\s+(\d+))?/, (msg, match) => {
   
   const targetId = match[1] ? parseInt(match[1]) : null;
   if (!targetId) {
-    bot.sendMessage(msg.chat.id, '⚠️ Usage: /ban <telegram_id>');
+    safeSend(bot.sendMessage(msg.chat.id, '⚠️ Usage: /ban <telegram_id>'), '/ban usage');
     return;
   }
-  
+
   try {
     // Permanently ban — blocks all future score submissions
     db.banPlayer(targetId, 'banned by admin');
-    
+
     // Remove all existing scores + forged badges
     db.removeAllPlayerScores(targetId);
     db.updatePlayerBadges(targetId, []);
     const tournaments = db.getAllTournaments();
     tournaments.forEach(t => db.removeTournamentScores(targetId, t.id));
-    
+
     const player = db.getPlayer(targetId);
     const name = player ? player.first_name : 'Unknown';
-    
-    bot.sendMessage(msg.chat.id, `🚫 Permanently banned *${escapeMarkdown(name)}* (${targetId})\n\nAll scores removed. Future submissions blocked.`, { parse_mode: 'Markdown' });
+
+    safeSend(bot.sendMessage(msg.chat.id, `🚫 Permanently banned *${escapeMarkdown(name)}* (${targetId})\n\nAll scores removed. Future submissions blocked.`, { parse_mode: 'Markdown' }), '/ban done');
     console.log(`🚫 Admin ${msg.from.id} banned player ${targetId}`);
   } catch(err) {
-    bot.sendMessage(msg.chat.id, '❌ Error: ' + err.message);
+    safeSend(bot.sendMessage(msg.chat.id, '❌ Error: ' + err.message), '/ban error');
   }
 });
 
@@ -430,41 +458,62 @@ bot.onText(/\/unban(?:\s+(\d+))?/, (msg, match) => {
   
   const targetId = match[1] ? parseInt(match[1]) : null;
   if (!targetId) {
-    bot.sendMessage(msg.chat.id, '⚠️ Usage: /unban <telegram_id>');
+    safeSend(bot.sendMessage(msg.chat.id, '⚠️ Usage: /unban <telegram_id>'), '/unban usage');
     return;
   }
-  
+
   try {
     db.unbanPlayer(targetId);
     const player = db.getPlayer(targetId);
     const name = player ? player.first_name : 'Unknown';
-    bot.sendMessage(msg.chat.id, `✅ Unbanned *${escapeMarkdown(name)}* (${targetId})`, { parse_mode: 'Markdown' });
+    safeSend(bot.sendMessage(msg.chat.id, `✅ Unbanned *${escapeMarkdown(name)}* (${targetId})`, { parse_mode: 'Markdown' }), '/unban done');
   } catch(err) {
-    bot.sendMessage(msg.chat.id, '❌ Error: ' + err.message);
+    safeSend(bot.sendMessage(msg.chat.id, '❌ Error: ' + err.message), '/unban error');
   }
 });
 
-bot.onText(/\/resettournament/, (msg) => {
+// Guarded (FIX 3): `/resettournament <tournament_id> CONFIRM`. This hard-DELETEs a
+// tournament's scores, so — mid a LIVE cash-prize race — it will only fire when an
+// EXACT known id and the literal keyword CONFIRM are both present. Anything else
+// (missing/wrong id, absent/mis-cased CONFIRM) replies with usage + the resolvable
+// ids + each id's current score-row count, and deletes nothing. Decision logic:
+// lib/reset-tournament-guard.js (pure, tested).
+bot.onText(/^\/resettournament(?:\s+(.+))?$/, (msg, match) => {
   if (!ADMIN_IDS.includes(msg.from.id)) return;
 
   try {
-    // Reset the live tournament if one exists, else most-recently-ended
-    const allTourneys = db.getAllTournaments();
-    const now = new Date();
-    const live = allTourneys.find(t => new Date(t.start_time) <= now && now <= new Date(t.end_time));
-    const recentEnded = allTourneys
-      .filter(t => now > new Date(t.end_time))
-      .sort((a, b) => new Date(b.end_time) - new Date(a.end_time))[0];
-    const target = live || recentEnded;
-    if (!target) {
-      bot.sendMessage(msg.chat.id, '🏟 No tournament to reset.');
+    const known = db.getAllTournaments().map(t => t.id);
+    const decision = parseResetCommand(match && match[1], known);
+
+    if (decision.action === 'reset') {
+      const before = db.countTournamentScores(decision.id);
+      db.resetTournamentScores(decision.id);
+      safeSend(bot.sendMessage(msg.chat.id, `🗑 Tournament scores wiped for \`${escapeMarkdown(decision.id)}\` — ${before} score row(s) deleted.`, { parse_mode: 'Markdown' }), '/resettournament done');
+      console.log(`🗑 Admin ${msg.from.id} reset tournament scores for ${decision.id} (${before} rows)`);
       return;
     }
-    db.resetTournamentScores(target.id);
-    bot.sendMessage(msg.chat.id, `🗑 Tournament scores wiped for *${escapeMarkdown(target.name)}*.`, { parse_mode: 'Markdown' });
-    console.log(`🗑 Admin ${msg.from.id} reset tournament scores for ${target.id}`);
+
+    const why = {
+      missing_args:    'No tournament id given.',
+      unknown_id:      `Unknown tournament id: \`${escapeMarkdown(String(decision.id))}\`.`,
+      missing_confirm: 'Missing the `CONFIRM` keyword.',
+      extra_args:      'Too many arguments.',
+    }[decision.reason] || 'Invalid command.';
+
+    const list = known.length
+      ? known.map(id => `• \`${escapeMarkdown(id)}\` — ${db.countTournamentScores(id)} score row(s)`).join('\n')
+      : '_(no tournaments)_';
+
+    safeSend(bot.sendMessage(msg.chat.id, [
+      `⚠️ ${why} Nothing was deleted.`,
+      '',
+      '*Usage:* `/resettournament <tournament_id> CONFIRM`',
+      '',
+      '*Tournaments:*',
+      list,
+    ].join('\n'), { parse_mode: 'Markdown' }), '/resettournament usage');
   } catch(err) {
-    bot.sendMessage(msg.chat.id, '❌ Error: ' + err.message);
+    safeSend(bot.sendMessage(msg.chat.id, '❌ Error: ' + err.message), '/resettournament error');
   }
 });
 
@@ -473,22 +522,22 @@ bot.onText(/\/history/, async (msg) => {
   const archives = db.getArchiveList();
   
   if (archives.length === 0) {
-    bot.sendMessage(msg.chat.id, '📁 No archived leaderboards yet. Archives are saved each Monday at reset.');
+    safeSend(bot.sendMessage(msg.chat.id, '📁 No archived leaderboards yet. Archives are saved each Monday at reset.'), '/history empty');
     return;
   }
-  
+
   // Send the most recent archive as a file
   const latest = archives[0];
   const filepath = db.getArchivePath(latest.week);
-  
+
   if (filepath) {
     const caption = `📁 *Archived Leaderboards*\n\nSending most recent: \`${latest.week}\`\n\n${archives.length} total archive(s):\n${archives.map(a => `• ${a.week}`).join('\n')}`;
-    
-    await bot.sendMessage(msg.chat.id, caption, { parse_mode: 'Markdown' });
-    await bot.sendDocument(msg.chat.id, filepath, {}, {
+
+    await safeSend(bot.sendMessage(msg.chat.id, caption, { parse_mode: 'Markdown' }), '/history caption');
+    await safeSend(bot.sendDocument(msg.chat.id, filepath, {}, {
       filename: latest.filename,
       contentType: 'text/csv',
-    });
+    }), '/history document');
   }
 });
 
@@ -499,7 +548,7 @@ bot.onText(/^\/tournament(?:\s+(.+))?$/, async (msg, match) => {
   const tournaments = db.getAllTournaments();
 
   if (tournaments.length === 0) {
-    bot.sendMessage(chatId, '🏟 No tournaments yet. Stay tuned!');
+    safeSend(bot.sendMessage(chatId, '🏟 No tournaments yet. Stay tuned!'), '/tournament none');
     return;
   }
 
@@ -520,12 +569,12 @@ bot.onText(/^\/tournament(?:\s+(.+))?$/, async (msg, match) => {
       t.name.toLowerCase().includes(arg)
     );
     if (matches.length === 0) {
-      bot.sendMessage(chatId, `🏟 No tournament matching "${arg}". Try /tournament with no args.`);
+      safeSend(bot.sendMessage(chatId, `🏟 No tournament matching "${arg}". Try /tournament with no args.`), '/tournament nomatch');
       return;
     }
     if (matches.length > 1) {
       const list = matches.map(t => `• ${t.name} (${t.id})`).join('\n');
-      bot.sendMessage(chatId, `🏟 Multiple matches:\n${list}\n\nTry a more specific keyword.`);
+      safeSend(bot.sendMessage(chatId, `🏟 Multiple matches:\n${list}\n\nTry a more specific keyword.`), '/tournament multi');
       return;
     }
     chosen = matches[0];
@@ -577,7 +626,7 @@ bot.onText(/^\/tournament(?:\s+(.+))?$/, async (msg, match) => {
     });
   } catch (err) {
     console.error('Tournament card render failed:', err.message);
-    bot.sendMessage(chatId, '❌ Failed to generate tournament leaderboard.');
+    safeSend(bot.sendMessage(chatId, '❌ Failed to generate tournament leaderboard.'), '/tournament error');
   }
 });
 
@@ -594,7 +643,7 @@ bot.on('web_app_data', (msg) => {
     const rank = db.getPlayerRank(userId);
     const rankText = rank ? `You're #${rank} this week!` : '';
 
-    bot.sendMessage(msg.chat.id, [
+    safeSend(bot.sendMessage(msg.chat.id, [
       `🎮 *Game Over!*`,
       ``,
       `📊 Score: *${Number(data.score) || 0}*`,
@@ -611,7 +660,7 @@ bot.on('web_app_data', (msg) => {
           { text: '🏆 Leaderboard', callback_data: 'show_leaderboard' },
         ]]
       }
-    });
+    }), 'web_app_data game-over');
   } catch (err) {
     console.error('WebApp data error:', err);
   }
@@ -620,7 +669,7 @@ bot.on('web_app_data', (msg) => {
 // ── Callback query handler ──────────────────────────────────────────
 bot.on('callback_query', async (query) => {
   if (query.data === 'show_leaderboard') {
-    await bot.answerCallbackQuery(query.id);
+    await safeSend(bot.answerCallbackQuery(query.id), 'callback answer');
     try {
       const entries = db.getWeeklyLeaderboard(50);
       const pngBuffer = renderLeaderboardCard(entries, {
