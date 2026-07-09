@@ -1,5 +1,66 @@
 # Flappy Bert Changelog
 
+## 2026-07-09 — Mid-Tournament Hardening
+
+Fairness, crash-safety, and UX fixes chosen so **nothing makes post-change runs
+harder than the conditions existing Summer Session scores were set under**
+(top score was 240/500 when this shipped). The riskier balance changes are
+deliberately deferred to the Sep 1 season boundary — see the
+"Mid-tournament fix policy" section in CLAUDE.md.
+
+### Headline changes
+
+- **Fair game speed on every device (fixed 60Hz timestep)** — physics
+  previously ran one step per display frame, so 120Hz phones played a 2x-speed
+  (much harder) game and throttling your frame rate was a score exploit. The
+  loop now runs a fixed-timestep accumulator: identical-to-before at 60Hz,
+  intended speed everywhere else, catch-up capped at 4 steps so a
+  backgrounded-tab return can't insta-kill you. Mirror:
+  `tests/lib/fixed-timestep.js`.
+- **Leaderboard tiebreak** — equal best scores now rank by who reached the
+  score **first**, on the weekly board, tournament board, rank captions, and
+  weekly CSV archives (identical ordering in the `RANK()` windows, and the
+  tournament `scoreResetAt` boundary applies to the tiebreak timestamp too).
+  Shipped **before** anyone reached the 500 cap, so no existing standings
+  changed — but with USD prizes on the Summer Session, tie order among capped
+  players must never be undefined row order.
+- **Server crash safety** — one failed Telegram send (429 burst / blocked bot)
+  could previously kill the whole process, score API included, since nothing
+  caught rejected send promises. Now: `unhandledRejection` logs and keeps
+  serving, `uncaughtException` exits cleanly for a supervised restart, every
+  unprotected send is wrapped in `safeSend` (`lib/safe-send.js`), and
+  `polling_error` storms log at most one line per error code per 30s.
+- **`/resettournament` is guarded** — now requires
+  `/resettournament <tournament_id> CONFIRM`. It previously auto-targeted the
+  LIVE tournament and irreversibly wiped its scores with no confirmation.
+  Rejections list every tournament id with its current score-row count.
+- **Auto-pause on interruptions** — a call/notification/app-switch mid-run now
+  pauses the game (overlay + button glyph in sync) instead of silently
+  forfeiting the run when the webview freezes mid-flight. Never auto-resumes.
+- **Game-over flow** — the reveal now actually sequences on EVERY death
+  (pre-existing bug: it only ran on the first death per session), with a dim
+  "TAP TO SKIP ▸" hint while it runs. The rank nudge now targets your nearest
+  attainable rank with a correct 1-based label (was: "N points behind #0"
+  pointing at the leader) and stays quiet on 0-score deaths, which also no
+  longer chirp "0 away from your best!" — a tied score says "TIED YOUR BEST!".
+- **HUD/copy polish** — magnet/frenzy pills no longer cover the coin counter;
+  challenge text bumped from 6px to a legible 9px; "STREAK: 1 DAYS" grammar.
+
+### Deferred to Sep 1 (season boundary) — on purpose
+
+Removing the shop 2x multiplier's effect on tournament scoring, extending the
+difficulty curve past the level-20 plateau, the coin-economy rebalance
+(quadratic combo faucet + a live-then-banked double-count), and tightening the
+server score-rate cap. Each would change difficulty or access mid-race in a way
+that advantages scores already on the board.
+
+### Tests
+
+87 → 119 (`fixed-timestep`, `rank-nudge`, `safe-send`, `reset-tournament-guard`,
+`leaderboard-tiebreak` — the tiebreak suite runs the real `db.js` queries
+against an isolated temp DB via the new `FLAPPY_DATA_DIR` override; the live
+`flappy_bert.db` is never touched by tests).
+
 ## 2026-05-29 — The Summer Session Update
 
 Summer content drop launching alongside **The Summer Session** tournament
