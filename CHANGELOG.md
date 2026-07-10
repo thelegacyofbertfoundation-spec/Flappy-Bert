@@ -1,5 +1,27 @@
 # Flappy Bert Changelog
 
+## 2026-07-10 — Faster Speed Progression (owner-approved mid-tournament)
+
+The speed ramp is now **+0.25/level (was +0.15)**; the cap is unchanged, so
+top speed is still 5.5 — reached at **score 110** instead of 190. Score 50 now
+plays at speed 4.0 (was 3.4), score 100 at 5.25 (was 4.15); the endgame band
+(190–500) is identical. Pipe gap, gravity, flap force, and base speed are
+untouched.
+
+**Why mid-tournament:** after the 2026-07-09 fixed-timestep fix, the majority
+of players (high-refresh phones) found the corrected game slow. This is an
+owner-approved exception to the mid-tournament freeze — it makes the 50–190
+band harder than the conditions earlier scores were set under; accepted
+because those players' conditions had already shifted with the timestep fix
+and the leaderboard race lives in the unchanged 190–500 band.
+
+Anti-tamper `expectedSpeed()` updated in the same commit (drift would
+silently discard legit speed-ups). New mirror + source-sync suite:
+`tests/lib/difficulty-curve.js`, `tests/difficulty-curve.test.js` (119 → 127
+tests). Server score validation unchanged — its 5 pts/sec ceiling was sized
+for the old 120Hz double-rate world and still comfortably covers the new
+curve. Spec: `docs/superpowers/specs/2026-07-10-speed-progression-design.md`.
+
 ## 2026-07-09 — Mid-Tournament Hardening
 
 Fairness, crash-safety, and UX fixes chosen so **nothing makes post-change runs
