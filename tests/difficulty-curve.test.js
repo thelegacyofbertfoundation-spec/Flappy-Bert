@@ -46,3 +46,20 @@ test('speed never decreases and gap never increases across levels 1..60', () => 
     assert.ok(gapAtLevel(lvl) <= gapAtLevel(lvl - 1), `gap rise at level ${lvl}`);
   }
 });
+
+// --- Source-sync: the two in-HTML formula sites must both carry the new curve.
+// updateDifficulty() writes G.gameSpeed; the anti-tamper expectedSpeed() gates
+// that write (rejects values above expected+0.5). If they drift, mid-game
+// speed-ups are silently discarded — so we grep the shipped HTML itself.
+const fs = require('node:fs');
+const path = require('node:path');
+const html = fs.readFileSync(path.join(__dirname, '..', 'flappy_bert.html'), 'utf8');
+
+test('flappy_bert.html carries the new formula at BOTH sites (updateDifficulty + expectedSpeed)', () => {
+  const hits = html.match(/Math\.min\(lvl \* 0\.25, 3\)/g) || [];
+  assert.equal(hits.length, 2, `expected exactly 2 sites, found ${hits.length}`);
+});
+
+test('no stale 0.15/level speed formula remains in flappy_bert.html', () => {
+  assert.ok(!/lvl \* 0\.15/.test(html), 'found leftover "lvl * 0.15"');
+});

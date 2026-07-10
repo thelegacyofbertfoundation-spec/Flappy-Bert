@@ -2082,8 +2082,10 @@ function updateDifficulty() {
   G.level = Math.floor(G.score / 10) + 1;
   const lvl = G.level;
 
-  // Speed increases gradually
-  G.gameSpeed = G.baseSpeed + Math.min(lvl * 0.15, 3);
+  // Speed increases gradually — 0.25/level since 2026-07-10 (cap unchanged at
+  // +3 = top speed 5.5 @ level 12). MUST match expectedSpeed() in the
+  // anti-tamper block and tests/lib/difficulty-curve.js.
+  G.gameSpeed = G.baseSpeed + Math.min(lvl * 0.25, 3);
 
   // Gap decreases
   G.pipeGap = Math.max(G.basePipeGap - lvl * 4, 110);
@@ -2493,7 +2495,10 @@ function updateLeaderboard(name, score) {
   
   function expectedSpeed() {
     const lvl = Math.floor(_score / 10) + 1;
-    return EXPECTED.baseSpeed + Math.min(lvl * 0.15, 3);
+    // MUST match updateDifficulty() — the G.gameSpeed setter rejects writes
+    // above expectedSpeed()+0.5, so a stale formula here silently freezes the
+    // game on the old curve.
+    return EXPECTED.baseSpeed + Math.min(lvl * 0.25, 3);
   }
   function expectedGap() {
     const lvl = Math.floor(_score / 10) + 1;
