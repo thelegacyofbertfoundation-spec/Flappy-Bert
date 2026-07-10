@@ -23,12 +23,14 @@ as next season's rules.
    submits divide out the shop multiplier server-side (client already keeps it
    honest in {1,1.5,2}). Decide alongside #3 — the multiplier is the main coin
    sink.
-2. **Extend the difficulty curve past level 20.** Speed/gap/interval all
-   plateau at score 200 while the cap is 500 — the last 60% of the range is a
-   flat endurance grind that funnels skilled players onto the cap (where ties
-   decide money). Ideas: resume gentle speed scaling to level 50, introduce the
-   laser JEET (backlog) at lvl 25+, or reduce coin spawns to zero at plateau.
-   Revisit whether the 500 cap itself should rise with a harder curve.
+2. **Extend the difficulty curve past level 20.** Everything is flat by score
+   ~190 while the cap is 500 — and since the 2026-07-10 ramp change (0.25/level,
+   an owner-approved exception to this gate; see CLAUDE.md policy section) speed
+   already maxes at score 110, so the flat endurance grind now covers even more
+   of the range. It funnels skilled players onto the cap (where ties decide
+   money). Ideas: resume gentle speed scaling to level 50, introduce the laser
+   JEET (backlog) at lvl 25+, or reduce coin spawns to zero at plateau. Revisit
+   whether the 500 cap itself should rise with a harder curve.
 3. **Coin economy rebalance.** Three coupled defects:
    - *Double-count bug:* near-miss/combo/magnet/shield coins are credited live
      AND banked again at game over via `G.coins += G.coinsEarned`
